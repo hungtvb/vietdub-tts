@@ -24,6 +24,12 @@ jobs:
         run: >-
           PYTHONPATH=src python -m vietdub_native.real_audio_probe
           --output data/real-audio-probe --limit 6 --min-ok 2 --acknowledge-rights
+      - name: Log rejection diagnostics
+        if: always()
+        run: |
+          if [ -f data/real-audio-probe/rejects.json ]; then
+            cat data/real-audio-probe/rejects.json
+          fi
       - name: Publish anonymous QA report (no waveform, transcript, or speaker ID)
         if: always()
         uses: actions/upload-artifact@v4
