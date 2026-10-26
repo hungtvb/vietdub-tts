@@ -31,6 +31,9 @@ def test_reject_untrusted_audio_urls():
         with pytest.raises(p.ProbeError):
             p._audio_url({'src': src})
     assert p._audio_url({'src': '/cached-assets/foo'}) == p.SERVER + '/cached-assets/foo'
+    assert p._audio_url([{'src': '/cached-assets/foo'}]) == p.SERVER + '/cached-assets/foo'
+    with pytest.raises(p.ProbeError, match='Ambiguous'):
+        p._audio_url([{'src': '/a'}, {'src': '/b'}])
 
 
 def test_requires_rights_and_bounded_size(tmp_path):

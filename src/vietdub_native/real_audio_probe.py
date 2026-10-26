@@ -51,6 +51,12 @@ def _get_json(url: str) -> dict:
 
 
 def _audio_url(value: object) -> str:
+    # HF Dataset Viewer wraps even a single recording in an audio list.
+    # Multi-clip rows require transcript review: never guess a matching clip.
+    if isinstance(value, list):
+        if len(value) != 1:
+            raise ProbeError("Ambiguous audio segments: expected exactly one audio per transcript")
+        value = value[0]
     if not isinstance(value, dict) or not isinstance(value.get("src"), str):
         raise ProbeError("Dataset row has no audio.src URL")
     src = value["src"]
