@@ -15,6 +15,7 @@ class Config:
     encoder_layers: int = 3
     decoder_layers: int = 3
     max_frames: int = 3000
+    tokenizer: str = "grapheme"  # or vi_phonetic_v1; saved with model
 
     def to_dict(self):
         return asdict(self)

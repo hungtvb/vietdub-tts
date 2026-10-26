@@ -27,9 +27,10 @@ class NativeSynthesizer:
             raise ValueError("Emotion intensity must be 0..1")
         if not 0.8 <= duration_scale <= 1.2:
             raise ValueError("duration_scale limited to 0.8..1.2 for film-dubbing QA")
-        if unknown_characters(text):
-            raise ValueError(f"Unsupported graphemes: {unknown_characters(text)}")
-        ids = torch.tensor([encode(text)], device=self.device)
+        mode = self.acoustic.cfg.tokenizer
+        if unknown_characters(text, mode):
+            raise ValueError(f"Unsupported tokens: {unknown_characters(text, mode)}")
+        ids = torch.tensor([encode(text, mode)], device=self.device)
         sid = torch.tensor([self.acoustic.speakers.index(speaker_id)], device=self.device)
         eid = torch.tensor([self.acoustic.emotions.index(emotion)], device=self.device)
         strength = torch.tensor([intensity], device=self.device)

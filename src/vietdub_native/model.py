@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from .config import Config, EMOTIONS
-from .symbols import VOCAB, PAD
+from .symbols import vocabulary, PAD
 
 
 class ConvBlock(nn.Module):
@@ -34,7 +34,7 @@ class AcousticModel(nn.Module):
         if len(set(self.emotions)) != len(self.emotions):
             raise ValueError("Duplicate emotions")
         h = cfg.hidden
-        self.characters = nn.Embedding(len(VOCAB), h, padding_idx=PAD)
+        self.characters = nn.Embedding(len(vocabulary(cfg.tokenizer)), h, padding_idx=PAD)
         self.speaker_embedding = nn.Embedding(len(self.speakers), h)
         self.emotion_embedding = nn.Embedding(len(self.emotions), h)
         self.intensity_projection = nn.Linear(1, h, bias=False)

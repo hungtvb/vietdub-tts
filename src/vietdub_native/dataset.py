@@ -11,14 +11,14 @@ import torch
 from torch.utils.data import Dataset
 from .audio import read_audio, mel_spectrogram
 from .config import Config, EMOTIONS
-from .symbols import encode, unknown_characters, PAD
+from .symbols import encode, unknown_characters, PAD, PHONETIC_MODE
 
 
 class ManifestError(ValueError):
     pass
 
 
-def read_manifest(path: str | Path) -> list[dict]:
+def read_manifest(path: str | Path, tokenizer: str = "grapheme") -> list[dict]:
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(path)
@@ -33,9 +33,18 @@ def read_manifest(path: str | Path) -> list[dict]:
             for k in ("text", "audio_path", "speaker_id", "emotion", "token_durations"):
                 if k not in row:
                     raise ValueError(f"Missing field {k}")
-            tokens = encode(row["text"])
-            if unknown_characters(row["text"]):
-                raise ValueError(f"Unrecognized graphemes: {unknown_characters(row['text'])}")
+            if row.get("tokenizer", "grapheme") != tokenizer:
+                raise ValueError(f"Alignment tokenizer mismatch: expected {tokenizer}")
+            if tokenizer == PHONETIC_MODE and (
+                row.get("alignment_verified") is not True
+                or not str(row.get("alignment_method", "")).strip()
+            ):
+                raise ValueError("Phonetic alignment requires reviewed method and alignment_verified=true")
+            if unknown_characters(row["text"], tokenizer):
+                raise ValueError(
+                    f"Unrecognized tokens: {unknown_characters(row['text'], tokenizer)}"
+                )
+            tokens = encode(row["text"], tokenizer)
             d = row["token_durations"]
             if len(d) != len(tokens) or any(type(n) is not int or n < 0 for n in d) or sum(d) < 1:
                 raise ValueError("token_durations must be nonnegative integer frames, 1 per grapheme")
@@ -59,7 +68,7 @@ def read_manifest(path: str | Path) -> list[dict]:
 
 class AlignedSpeechDataset(Dataset):
     def __init__(self, manifest: str | Path, cfg: Config, speakers: list[str]):
-        self.rows = read_manifest(manifest)
+        self.rows = read_manifest(manifest, tokenizer=cfg.tokenizer)
         self.cfg = cfg
         self.speakers = {name: i for i, name in enumerate(speakers)}
         for row in self.rows:

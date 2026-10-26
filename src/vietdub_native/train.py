@@ -25,7 +25,7 @@ def train_acoustic(manifest, out_dir, *, epochs=1, batch_size=2, lr=2e-4,
         raise ValueError("epochs and batch_size must be positive")
     cfg = cfg or Config()
     seed_all(seed)
-    speakers = sorted({r["speaker_id"] for r in read_manifest(manifest)})
+    speakers = sorted({r["speaker_id"] for r in read_manifest(manifest, tokenizer=cfg.tokenizer)})
     ds = AlignedSpeechDataset(manifest, cfg, speakers)
     dl = DataLoader(ds, batch_size=batch_size, shuffle=True, collate_fn=collate_acoustic)
     model = AcousticModel(cfg, speakers).to(device).train()
