@@ -1,0 +1,8 @@
+{
+  "default_preset": "Hải Đăng",
+  "characters": {
+    "female_lead": {"preset": "Mai Anh"},
+    "male_lead": {"preset": "Hải Đăng"},
+    "narrator": {"preset": "Thiện Minh"}
+  }
+}

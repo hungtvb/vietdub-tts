@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.env
+output*.wav
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+models/
+data/private/
