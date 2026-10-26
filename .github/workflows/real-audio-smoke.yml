@@ -32,6 +32,13 @@ jobs:
                   print(key, "type=", type(value).__name__,
                         "keys=", list(value.keys()) if isinstance(value, dict) else "-",
                         "is_none=", value is None)
+          audio = first.get("audio")
+          if isinstance(audio, list):
+              print("audio_list_length:", len(audio))
+              if audio:
+                  first_audio = audio[0]
+                  print("first_audio_type:", type(first_audio).__name__,
+                        "first_audio_keys:", list(first_audio.keys()) if isinstance(first_audio,dict) else "-")
           PY
       - name: Probe genuine Vietnamese recordings (never train or publish voices)
         run: >-
