@@ -54,3 +54,11 @@ def test_weak_supervision_synthesizes_new_wav_but_does_not_certify_quality(tmp_p
     assert isinstance(report['acoustic_signal_present'], bool)
     assert 'generated_dc_ratio' in report
     assert not (tmp_path/'out'/'transcripts.jsonl').exists()
+
+
+def test_unintelligible_demo_never_released(tmp_path):
+    m=_manifest(tmp_path)
+    cfg=Config(n_fft=256,n_mels=16,hidden=16,encoder_layers=1,decoder_layers=1,max_frames=200)
+    r=run_research_demo(m,tmp_path/'qa',rights_reviewed=True,ctc_steps=1,acoustic_steps=1,vocoder_steps=1,max_clips=2,cfg=cfg)
+    assert r['candidate_for_listening'] is False
+    assert r['release_approved'] is False
