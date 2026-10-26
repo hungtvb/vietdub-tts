@@ -198,6 +198,7 @@ def run_research_demo(manifest: str | Path, output_dir: str | Path, *,
     if (not math.isfinite(rms) or rms < 1e-5 or duration <= 0.03
             or not np.isfinite(generated).all()):
         raise ResearchError("Generated demo WAV failed signal validation")
+    candidate_for_listening = bool(duration >= 2.0 and ac_rms >= 0.01 and dc_ratio < 0.20 and 0.005 < zero_cross_rate < 0.45 and acoustic_signal_present)
     report = {"result": "WAV_SYNTHESIS_SMOKE_ONLY", "intelligibility_verified": False,
               "emotion_verified": False, "speaker_identity_verified": False,
               "training_approved": False, "weak_alignment_reviewed": False,
@@ -216,6 +217,8 @@ def run_research_demo(manifest: str | Path, output_dir: str | Path, *,
               "generated_dc_ratio": round(dc_ratio, 6),
               "generated_zero_crossing_rate": round(zero_cross_rate, 6),
               "acoustic_signal_present": bool(acoustic_signal_present),
+              "candidate_for_listening": candidate_for_listening,
+              "release_approved": False,
               "source_clip_hashes_sha256": [s["sha"] for s in samples],
               "note": "Independent neural TTS proof-of-generation. Tiny unreviewed real corpus. No realistic Vietnamese speech quality claim; mixed unknown source speakers; checkpoints are not released."}
     (out / "research_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
