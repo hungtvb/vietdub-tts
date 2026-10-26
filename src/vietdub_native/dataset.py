@@ -35,6 +35,8 @@ def read_manifest(path: str | Path, tokenizer: str = "grapheme") -> list[dict]:
                     raise ValueError(f"Missing field {k}")
             if row.get("tokenizer", "grapheme") != tokenizer:
                 raise ValueError(f"Alignment tokenizer mismatch: expected {tokenizer}")
+            if row.get("alignment_verified") is False:
+                raise ValueError("Unverified alignment proposal must be reviewed before training")
             if tokenizer == PHONETIC_MODE and (
                 row.get("alignment_verified") is not True
                 or not str(row.get("alignment_method", "")).strip()
