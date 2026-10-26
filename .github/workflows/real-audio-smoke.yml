@@ -1,0 +1,33 @@
+name: Real Vietnamese Audio Probe
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/vietdub_native/real_audio_probe.py
+      - tests/test_real_audio_probe.py
+      - .github/workflows/real-audio-smoke.yml
+  workflow_dispatch:
+jobs:
+  fosd-real-audio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install audio dependencies
+        run: pip install 'numpy>=1.26' 'soundfile>=0.12' 'soxr>=0.5'
+      - name: Probe genuine Vietnamese recordings (never train or publish voices)
+        run: >-
+          PYTHONPATH=src python -m vietdub_native.real_audio_probe
+          --output data/real-audio-probe --limit 6 --min-ok 2 --acknowledge-rights
+      - name: Publish anonymous QA report (no waveform, transcript, or speaker ID)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fosd-real-audio-qa
+          path: data/real-audio-probe/report.json
+          if-no-files-found: warn
