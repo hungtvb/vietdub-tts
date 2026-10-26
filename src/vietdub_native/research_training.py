@@ -75,7 +75,7 @@ def run_research_demo(manifest: str | Path, output_dir: str | Path, *,
                       acoustic_steps: int = 24, vocoder_steps: int = 10,
                       max_clips: int = 6, device: str = "cpu", seed: int = 7,
                       cfg: Config | None = None) -> dict:
-    """Create a native model WAV; return diagnostics, never certify intelligibility.
+    """Create a native model WAV; report signal validity separately from file validity.
 
     This experiment uses automatic CTC duration proposals with no human review.
     It is **not** train_acoustic and MUST NOT be promoted to production.
@@ -162,7 +162,8 @@ def run_research_demo(manifest: str | Path, output_dir: str | Path, *,
         truth = F.pad(truth, (0, max(0, crop_len * cfg.hop_length - len(truth))))[:crop_len * cfg.hop_length]
         truth = truth[None].to(target_device)
         generated = vocoder(mel_crop)
-        loss = spectral_loss(generated, truth) + 0.25 * (generated - truth).abs().mean()
+        loss = (spectral_loss(generated, truth) + 0.25 * (generated - truth).abs().mean()
+                + 0.5 * generated.mean(dim=-1).abs().mean())
         if not torch.isfinite(loss):
             raise ResearchError("Nonfinite vocoder loss")
         vocoder_opt.zero_grad(set_to_none=True)
@@ -188,6 +189,12 @@ def run_research_demo(manifest: str | Path, output_dir: str | Path, *,
     generated, sample_rate = sf.read(wav, dtype="float32")
     duration = len(generated) / sample_rate
     rms = float(np.sqrt(np.mean(generated.astype(np.float64)**2)))
+    dc = float(abs(np.mean(generated)))
+    ac_rms = float(np.std(generated.astype(np.float64)))
+    dc_ratio = dc / max(rms, 1e-10)
+    zero_cross_rate = float(np.mean(np.signbit(generated[:-1]) != np.signbit(generated[1:])))
+    acoustic_signal_present = (ac_rms >= 0.001 and dc_ratio < 0.90
+                               and zero_cross_rate > 0.001)
     if (not math.isfinite(rms) or rms < 1e-5 or duration <= 0.03
             or not np.isfinite(generated).all()):
         raise ResearchError("Generated demo WAV failed signal validation")
@@ -205,6 +212,10 @@ def run_research_demo(manifest: str | Path, output_dir: str | Path, *,
               "generated_sample_rate": sample_rate,
               "generated_duration_sec": round(duration, 3),
               "generated_rms": round(rms, 6),
+              "generated_ac_rms": round(ac_rms, 6),
+              "generated_dc_ratio": round(dc_ratio, 6),
+              "generated_zero_crossing_rate": round(zero_cross_rate, 6),
+              "acoustic_signal_present": bool(acoustic_signal_present),
               "source_clip_hashes_sha256": [s["sha"] for s in samples],
               "note": "Independent neural TTS proof-of-generation. Tiny unreviewed real corpus. No realistic Vietnamese speech quality claim; mixed unknown source speakers; checkpoints are not released."}
     (out / "research_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

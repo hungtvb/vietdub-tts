@@ -38,7 +38,7 @@ jobs:
           python -m vietdub_native.research_training
           --manifest data/real-audio-probe/transcripts.jsonl
           --output-dir data/native-real-demo
-          --ctc-steps 12 --acoustic-steps 24 --vocoder-steps 10
+          --ctc-steps 60 --acoustic-steps 120 --vocoder-steps 100
           --acknowledge-source-rights-reviewed
       - name: Validate generated WAV and provenance
         run: |
@@ -49,6 +49,7 @@ jobs:
           assert report['clip_count'] == 6
           assert report['training_approved'] is False
           assert report['intelligibility_verified'] is False
+          assert report['acoustic_signal_present'], 'WAV is mostly DC: not audible speech/audio'
           info = sf.info(p/'vietdub-tts-demo.wav')
           assert info.samplerate == 44100 and info.frames > 0
           print('WAV_VALIDATION_PASSED', report['generated_duration_sec'], info.samplerate)

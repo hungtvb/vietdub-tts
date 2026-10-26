@@ -46,3 +46,14 @@ Artifact retention is limited. GitHub Actions time and network limits apply.
 - Next validation requires a legally approved, curated multi-hour speaker
   corpus, ground-truth timing review, independent transcription accuracy and
   blind subjective listening tests.
+
+## v2 waveform-quality gate
+
+A generated WAV can be valid PCM yet carry only a DC bias or imperceptible
+variations. The research report now measures *AC RMS*, DC/RMS ratio and
+zero-crossing rate. The workflow fails its quality gate unless
+`acoustic_signal_present` is true. Passing this gate shows nontrivial waveform
+variation, **not intelligible speech**. This was added after the first 0.406s
+v1 sample measured `DC/RMS=0.9983` and zero crossings of 0. Training settings
+for the second experiment increase CTC/acoustic/vocoder steps to 60/120/100,
+respectively. No speaker/emotion approval flag is changed.

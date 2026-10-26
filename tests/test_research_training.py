@@ -51,4 +51,6 @@ def test_weak_supervision_synthesizes_new_wav_but_does_not_certify_quality(tmp_p
     assert report['clip_count']==2
     assert report['training_approved'] is False
     assert report['intelligibility_verified'] is False
+    assert isinstance(report['acoustic_signal_present'], bool)
+    assert 'generated_dc_ratio' in report
     assert not (tmp_path/'out'/'transcripts.jsonl').exists()
