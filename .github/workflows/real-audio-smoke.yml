@@ -20,6 +20,19 @@ jobs:
           python-version: '3.11'
       - name: Install audio dependencies
         run: pip install 'numpy>=1.26' 'soundfile>=0.12' 'soxr>=0.5'
+      - name: Inspect dataset viewer audio schema (metadata only)
+        run: |
+          PYTHONPATH=src python - <<'PY'
+          from vietdub_native.real_audio_probe import _find_split, _load_rows
+          config, split = _find_split()
+          first = _load_rows(config, split, 1)[0].get("row", {})
+          print("fields:", list(first.keys()))
+          for key, value in first.items():
+              if key not in ("text", "transcription"):
+                  print(key, "type=", type(value).__name__,
+                        "keys=", list(value.keys()) if isinstance(value, dict) else "-",
+                        "is_none=", value is None)
+          PY
       - name: Probe genuine Vietnamese recordings (never train or publish voices)
         run: >-
           PYTHONPATH=src python -m vietdub_native.real_audio_probe
