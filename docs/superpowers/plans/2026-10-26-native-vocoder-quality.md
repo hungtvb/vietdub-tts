@@ -1,0 +1,75 @@
+# Native Vocoder Quality Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Provide a genuinely trainable, independently versioned neural vocoder with a licensed train/dev dataset and reconstruction evidence rather than a noise-demo-only pipeline.
+
+**Architecture:** Separate rights-gated `VocoderWaveDataset` from acoustic alignment, implement an isolated generator + multi-period critic, then add GPU-capable training, private checkpoint and held-out validation. Existing acoustic checkpoints/API remain unaffected.
+
+**Tech Stack:** Python 3.11+, PyTorch, torchaudio, soundfile, numpy, pytest; optional CUDA.
+
+**Spec:** `docs/superpowers/specs/2026-10-26-native-vocoder-quality-design.md`
+
+## Global Constraints
+
+- Never mark `training_approved`, `alignment_verified`, emotion, transcript or voice rights as true automatically.
+- No pretrained speech generator or checkpoint dependency.
+- Waveform training data remain local; CI uses synthetic fixtures only.
+- Separate branch and PR, never commit directly to `main`.
+- Evidence must include held-out reconstruction and explicit `intelligibility_verified: false` until listened to and accepted.
+
+## Review Focus
+
+1. Identical audio in train/dev despite different asserted hashes -> reject (Task 1).
+2. WAV path traversal / symlink -> reject (Task 1).
+3. Missing training rights, performer consent for actor data -> reject (Task 1).
+4. Upsampling frame-length mismatch -> fail loudly (Task 2).
+5. Training mistakenly on dev and publishing original voices -> exclude dev optimizer and source audio from artifacts (Task 3).
+
+---
+
+### Task 1: Independent approved vocoder corpus
+
+**Files:** `src/vietdub_native/vocoder_corpus.py`, `tests/test_hifigan_training.py`
+
+**Interfaces:** `read_vocoder_manifest(path, split)`, `VocoderWaveDataset(manifest, cfg, split, crop_frames)`.
+
+- [x] **RED:** Write corpus tests with no transcript or alignment; test missing approval, traversal, source duplicates and actor consent. Run `PYTHONPATH=src pytest tests/test_hifigan_training.py -q` and observe missing module / failing duplicate guard.
+- [x] **GREEN:** Validate each manifest row and compute deterministic matching mel/waveform crops; check SHA of prepared file, not merely manifest assertion.
+- [x] **VERIFY:** `PYTHONPATH=src pytest tests/test_hifigan_training.py -q` locally.
+- [ ] **COMMIT/REVIEW:** Include with atomic PR and rerun repository-wide tests in GitHub Actions.
+
+### Task 2: Native HiFi-GAN generator and discriminator
+
+**Files:** `src/vietdub_native/hifigan.py`, `tests/test_hifigan_training.py`
+
+**Interfaces:** `HiFiGANGenerator(cfg, channels)`, `MultiPeriodDiscriminator(channels, periods)`, `discriminator_loss`, `generator_loss`.
+
+- [x] **RED:** Test output exact length, finite loss and input gradients before implementation.
+- [x] **GREEN:** Implement 8x8x4 transposed upsampling, dilated residual blocks and period critics.
+- [x] **VERIFY:** Assert `mel[2,16,12] -> audio[2,3072]` and backpropagation on CPU.
+- [ ] **COMMIT/REVIEW:** Review gradient flow, long-audio inference and architectural simplifications.
+
+### Task 3: Independent vocoder training and evaluation
+
+**Files:** `src/vietdub_native/hifigan_train.py`, `tests/test_hifigan_training.py`, `docs/NATIVE_VOCODER_TRAINING.md`
+
+**Interfaces:** `train_hifigan(manifest, output_dir, *, cfg, steps, crop_frames, generator_channels, discriminator_channels, lr, device, seed) -> dict`.
+
+- [x] **RED:** Test one-step synthetic train/dev run and expect checkpoint, report and reconstructed (not original) dev WAV.
+- [x] **GREEN:** Alternate discriminator/generator updates, use spectral and feature-matching losses, save own generator weights and held-out reconstruction.
+- [x] **VERIFY:** Check `intelligibility_verified=false`; run synthetic fixtures locally.
+- [ ] **COMMIT/REVIEW:** CI complete; do not distribute training/dev recordings.
+
+### Task 4: GPU-scale real-data evaluation (next independent milestone)
+
+**Files:** `.github/workflows/...` (optional manual workflow), dataset-specific review manifest and private GPU runner config.
+
+- [ ] Acquire and verify sufficient rights-cleared Vietnamese speech, review manifests and prepare separate dev set.
+- [ ] Train generator/discriminator with resumable epochs/steps and performance budget on actual GPU.
+- [ ] Compare reconstructed held-out speech to source via listening and objective metrics; document results.
+- [ ] Only when acceptable reconstruction is proven, begin VITS/text-to-mel design and training.
+
+## Current Execution Evidence
+
+Initial local TDD produced an import error (`vocoder_corpus` absent), then 7 passing tests. Added duplicate-content test failed as expected, fixed actual byte-hash duplicate detection, then 9 local tests passed. GitHub Actions must independently confirm the full suite before PR completion.
