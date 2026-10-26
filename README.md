@@ -38,6 +38,21 @@ Supported source metadata: Mozilla Common Voice Vietnamese v27, FPT Open Speech 
 
 See [real data sourcing and import instructions](docs/REAL_DATA.md).
 
+### Real corpus audit and training gate
+
+Before training on any imported real-data corpus, human-review its transcripts,
+rights, speaker and emotion labels and run the versioned readiness checker:
+
+```bash
+vietdub-audit data/prepared/fosd/transcripts.jsonl --stage aligner --strict
+vietdub-audit data/approved/aligned.jsonl --stage acoustic --strict
+vietdub-audit data/approved/aligned.jsonl --stage expressive --strict
+```
+
+The train commands enforce this audit on provenance-tagged datasets. New imports
+are intentionally NOT train-ready. See [training readiness guide](docs/TRAINING_READINESS.md).
+
+
 ## Training workflow
 
 A dataset is JSON Lines, each row with text, `audio_path` (relative to the manifest), `speaker_id`, `emotion`, `emotion_intensity` (0..1), and `token_durations` (nonnegative **mel frame counts** for every character after NFC normalization, including spaces). Alignments must be independently produced and verified with `sample_rate=22050`, `hop_length=256`, `n_fft=1024`, mel `center=True`.

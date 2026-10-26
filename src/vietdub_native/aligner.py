@@ -139,6 +139,12 @@ def train_aligner(manifest: str | Path, out_path: str | Path, *, cfg: Config | N
     cfg = cfg or Config()
     torch.manual_seed(seed)
     ds = TranscriptDataset(manifest, cfg)
+    if any("dataset_source" in row for row in ds.rows):
+        from .data_audit import audit_manifests
+        report = audit_manifests([manifest], stage="aligner")
+        stats = report["by_split"]["train"]
+        if stats["total"] == 0 or stats["ready"] != stats["total"]:
+            raise AlignmentError(f"Real corpus not approved for CTC training: {report['failure_reasons']}")
     model = CTCAligner(cfg).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     batches = DataLoader(ds, batch_size=batch_size, shuffle=True, collate_fn=collate_transcripts)

@@ -16,6 +16,7 @@ dev = ["pytest>=8", "httpx>=0.27"]
 [project.scripts]
 vietdub-native = "vietdub_native.cli:main"
 vietdub-datasets = "vietdub_native.data_sources:main"
+vietdub-audit = "vietdub_native.data_audit:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

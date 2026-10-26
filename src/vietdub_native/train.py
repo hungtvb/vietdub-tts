@@ -25,7 +25,14 @@ def train_acoustic(manifest, out_dir, *, epochs=1, batch_size=2, lr=2e-4,
         raise ValueError("epochs and batch_size must be positive")
     cfg = cfg or Config()
     seed_all(seed)
-    speakers = sorted({r["speaker_id"] for r in read_manifest(manifest, tokenizer=cfg.tokenizer)})
+    rows = read_manifest(manifest, tokenizer=cfg.tokenizer)
+    if any("dataset_source" in row for row in rows):
+        from .data_audit import audit_manifests
+        report = audit_manifests([manifest], stage="acoustic")
+        stats = report["by_split"]["train"]
+        if stats["total"] == 0 or stats["ready"] != stats["total"]:
+            raise ValueError(f"Real corpus not approved for acoustic/vocoder training: {report['failure_reasons']}")
+    speakers = sorted({r["speaker_id"] for r in rows})
     ds = AlignedSpeechDataset(manifest, cfg, speakers)
     dl = DataLoader(ds, batch_size=batch_size, shuffle=True, collate_fn=collate_acoustic)
     model = AcousticModel(cfg, speakers).to(device).train()
@@ -58,7 +65,14 @@ def train_vocoder(manifest, out_dir, *, epochs=1, lr=2e-4,
         raise ValueError("epochs must be positive")
     cfg = cfg or Config()
     seed_all(seed)
-    speakers = sorted({r["speaker_id"] for r in read_manifest(manifest)})
+    rows = read_manifest(manifest, tokenizer=cfg.tokenizer)
+    if any("dataset_source" in row for row in rows):
+        from .data_audit import audit_manifests
+        report = audit_manifests([manifest], stage="acoustic")
+        stats = report["by_split"]["train"]
+        if stats["total"] == 0 or stats["ready"] != stats["total"]:
+            raise ValueError(f"Real corpus not approved for acoustic/vocoder training: {report['failure_reasons']}")
+    speakers = sorted({r["speaker_id"] for r in rows})
     ds = AlignedSpeechDataset(manifest, cfg, speakers)
     model = NeuralVocoder(cfg).to(device).train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
