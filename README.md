@@ -81,3 +81,8 @@ Serve locally with environment variables `VIETDUB_ACOUSTIC_CHECKPOINT` and `VIET
 Architecture and training loops were implemented specifically for VietDub. Design principles (non-autoregressive text-to-mel, duration regulation, mel-to-wave upsampling) are common published neural speech ideas, not a claim of a newly discovered academic architecture. Training starts from random weights. Use only speaker audio with appropriate rights/consent and log data provenance.
 
 See [research roadmap](docs/ROADMAP.md) and [dataset spec](docs/DATASET.md).
+
+
+### Original FOSD dataset support
+
+Use `vietdub-fosd` to convert locally authorized FOSD TXT/MP3 and timestamps into a **review-only** clip CSV. Ambiguous time intervals are rejected; no speaker, emotion or training verification is manufactured. See [FOSD preparation](docs/FOSD_PREPARE.md).
