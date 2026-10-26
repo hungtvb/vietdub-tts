@@ -20,6 +20,11 @@ jobs:
           python-version: '3.11'
       - name: Install audio dependencies
         run: pip install 'numpy>=1.26' 'soundfile>=0.12' 'soxr>=0.5'
+      - name: Install ffmpeg decoder
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -n 1
       - name: Inspect dataset viewer audio schema (metadata only)
         run: |
           PYTHONPATH=src python - <<'PY'
