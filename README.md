@@ -25,6 +25,19 @@ pip install -e '.[dev,api]'
 pytest -q
 ```
 
+## Real speech data intake
+
+Do not train on synthetic sine-wave test fixtures. VietDub now provides an **offline, rights-attested corpus importer** with source provenance, audio QA, speaker pseudonymization and review gates. It does **not** auto-download external voices.
+
+```bash
+vietdub-datasets sources
+# See docs/REAL_DATA.md for real dataset import examples.
+```
+
+Supported source metadata: Mozilla Common Voice Vietnamese v27, FPT Open Speech Dataset v4, Google FLEURS Vietnamese, or separately consented actor recordings. Actual source terms and permission to train/distribute must be checked manually. Imports are unaligned, not emotion-verified.
+
+See [real data sourcing and import instructions](docs/REAL_DATA.md).
+
 ## Training workflow
 
 A dataset is JSON Lines, each row with text, `audio_path` (relative to the manifest), `speaker_id`, `emotion`, `emotion_intensity` (0..1), and `token_durations` (nonnegative **mel frame counts** for every character after NFC normalization, including spaces). Alignments must be independently produced and verified with `sample_rate=22050`, `hop_length=256`, `n_fft=1024`, mel `center=True`.
