@@ -62,7 +62,7 @@ def test_empty_or_malformed_viewer_responses(monkeypatch):
 def test_end_to_end_probe_mocked_audio(tmp_path, monkeypatch):
     audio = _fake_audio()
     rows = [{'row_idx': i, 'row': {
-        'text': f'xin chào {i}', 'audio': {'src': f'{p.SERVER}/asset-{i}.wav'}}}
+        'text': f'xin chào {i}', 'audio': [{'src': f'{p.SERVER}/asset-{i}.wav'}]}}
         for i in range(3)]
     monkeypatch.setattr(p, '_find_split', lambda: ('default', 'train'))
     monkeypatch.setattr(p, '_load_rows', lambda *args: rows)
@@ -72,6 +72,8 @@ def test_end_to_end_probe_mocked_audio(tmp_path, monkeypatch):
     report = p.probe(out, rights_acknowledged=True, limit=3, min_ok=3)
     assert report['downloaded_decoded'] == 3
     assert report['training_approved'] is False
+    assert report['f0_measured_clips'] == 3
+    assert 180 < report['median_f0_hz'] < 260
     parsed = [json.loads(s) for s in (out/'transcripts.jsonl').read_text().splitlines()]
     assert all(row['speaker_id'] == 'unassigned' for row in parsed)
     assert all(row['alignment_verified'] is False for row in parsed)

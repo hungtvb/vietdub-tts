@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 import os
+import statistics
 from pathlib import Path
 import subprocess
 import tempfile
@@ -18,6 +19,7 @@ from urllib import parse, request
 import soundfile as sf
 
 from .data_sources import inspect_audio, IntakeError
+from .prosody_features import extract_prosody
 from .symbols import unknown_characters
 
 DATASET = "awghuku/fosd"  # unofficial mirror; publisher original at Mendeley
@@ -51,8 +53,8 @@ def _get_json(url: str) -> dict:
 
 
 def _audio_url(value: object) -> str:
-    # HF Dataset Viewer wraps even a single recording in an audio list.
-    # Multi-clip rows require transcript review: never guess a matching clip.
+    # Hugging Face represents multi-audio columns as a list, even with 1 clip.
+    # More than 1 clip for one transcript must be reviewed before pairing.
     if isinstance(value, list):
         if len(value) != 1:
             raise ProbeError("Ambiguous audio segments: expected exactly one audio per transcript")
@@ -143,7 +145,8 @@ def probe(output_dir: str | Path, *, rights_acknowledged: bool,
             out_file = clips / f"{sha[:20]}.wav"
             _to_wav(raw, out_file)
             try:
-                _, quality = inspect_audio(out_file, min_seconds=0.4, max_seconds=20)
+                signal, quality = inspect_audio(out_file, min_seconds=0.4, max_seconds=20)
+                prosody = extract_prosody(signal)
                 if sf.info(out_file).samplerate != 22050:
                     raise ProbeError("Output WAV sample rate mismatch")
             except Exception:
@@ -157,13 +160,18 @@ def probe(output_dir: str | Path, *, rights_acknowledged: bool,
                             "split": "review_unassigned", "transcript_verified": False,
                             "alignment_verified": False, "license": "CC-BY-4.0 + FPT notice",
                             "source_url": FPT_URL, "original_dataset_row": index,
-                            "source_sha256": sha, "audio_quality": quality})
+                            "source_sha256": sha, "audio_quality": quality,
+                            "prosody_diagnostics": prosody})
         except (ProbeError, IntakeError, ValueError, OSError, subprocess.TimeoutExpired) as exc:
             rejected.append({"row_idx": index, "reason": str(exc)[:220]})
+    measured_f0 = [x["prosody_diagnostics"]["pitch_median_hz"] for x in entries
+                   if x["prosody_diagnostics"]["pitch_median_hz"] is not None]
     report = {"source_dataset": DATASET, "original_publisher": FPT_URL,
               "dataset_config": config, "source_split": split,
               "downloaded_decoded": len(entries), "rejected": len(rejected),
               "total_seconds": round(sum(x["audio_quality"]["duration_sec"] for x in entries), 4),
+              "f0_measured_clips": len(measured_f0),
+              "median_f0_hz": round(float(statistics.median(measured_f0)), 2) if measured_f0 else None,
               "training_approved": False,
               "note": "Real source waveforms inspected; unverified speaker, transcript, emotion and alignment. No trained TTS checkpoint."}
     (dest / "transcripts.jsonl").write_text("".join(json.dumps(row, ensure_ascii=False) + "\n"
