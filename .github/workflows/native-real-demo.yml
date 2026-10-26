@@ -1,0 +1,66 @@
+name: Real Native TTS Demo
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/vietdub_native/research_training.py'
+      - 'tests/test_research_training.py'
+      - '.github/workflows/native-real-demo.yml'
+  workflow_dispatch:
+jobs:
+  native-real-wav:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install torch CPU + other dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install '.[dev,api]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Prepare audio decoder
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Download genuinely recorded Vietnamese research clips
+        run: >-
+          python -m vietdub_native.real_audio_probe
+          --output data/real-audio-probe --limit 6 --min-ok 6 --acknowledge-rights
+      - name: Train native models and synthesize WAV (experimental, unapproved)
+        run: >-
+          python -m vietdub_native.research_training
+          --manifest data/real-audio-probe/transcripts.jsonl
+          --output-dir data/native-real-demo
+          --ctc-steps 12 --acoustic-steps 24 --vocoder-steps 10
+          --acknowledge-source-rights-reviewed
+      - name: Validate generated WAV and provenance
+        run: |
+          python - <<'PY'
+          import json, pathlib, soundfile as sf
+          p = pathlib.Path('data/native-real-demo')
+          report = json.loads((p/'research_report.json').read_text())
+          assert report['clip_count'] == 6
+          assert report['training_approved'] is False
+          assert report['intelligibility_verified'] is False
+          info = sf.info(p/'vietdub-tts-demo.wav')
+          assert info.samplerate == 44100 and info.frames > 0
+          print('WAV_VALIDATION_PASSED', report['generated_duration_sec'], info.samplerate)
+          PY
+      - name: Upload ONLY synthesized demo WAV and evidence (not checkpoints/source recordings)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vietdub-native-research-wav
+          path: |
+            data/native-real-demo/vietdub-tts-demo.wav
+            data/native-real-demo/research_report.json
+            data/native-real-demo/NOTICE.txt
+          retention-days: 1
+          if-no-files-found: warn
