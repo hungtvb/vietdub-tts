@@ -14,6 +14,37 @@ This is a schema example only. Do **not** set approval fields to true until actu
 
 The trainer requires two or more approved train clips and at least one approved held-out dev clip. It does not need transcripts, token durations or emotion labels. It rejects duplicate source hashes and duplicate prepared WAV contents across train/dev, path escapes, non-mono audio or unexpected sample rates. `rights_verified` is an assertion, not proof of legal permission.
 
+## Prepare a larger Vietnamese corpus — Mozilla Common Voice
+
+Official catalog: https://commonvoice.mozilla.org/ (the Vietnamese scripted-speech release is listed as CC0-1.0). Download the release **through the official Mozilla Data Collective**, verify its exact version/license, and unpack it privately so that `validated.tsv` and `clips/*.mp3` are present. Do not bypass login/access terms or upload source voice files to this public GitHub repository.
+
+Vocoder-only training does **not** need transcriptions or forced alignment. The preparer uses `client_id` only to keep speakers out of both train and dev, and never writes raw client IDs to its output. It also rejects silent/clipped clips and reports quality rejects. Rows without known `client_id` are skipped rather than silently treated as different people. It records original audio digests and converts bounded clips to mono 22050 Hz WAV. Source files remain untouched.
+
+First produce an **unapproved review-only dataset**:
+
+```bash
+vietdub-commonvoice-vocoder \
+  --source-root /kaggle/input/common-voice-vi \
+  --output-dir /kaggle/working/vietdub-vocoder-review \
+  --max-clips 10000
+```
+
+Inspect `import_report.json`, source provenance and clips. Without operator approvals, `train_hifigan` refuses this manifest. After separately verifying the **specific release's licensing, contributor terms and permitted voice uses**, prepare a fresh approved directory with both deliberate confirmations:
+
+```bash
+vietdub-commonvoice-vocoder \
+  --source-root /kaggle/input/common-voice-vi \
+  --output-dir /kaggle/working/vietdub-vocoder-approved \
+  --max-clips 10000 \
+  --acknowledge-rights-reviewed --approve-vocoder-training
+```
+
+The two flags reflect **operator assertions**: the importer does not independently prove them. Original audio and generated training checkpoints should be stored privately. Before claiming a new model works, run GPU training for a meaningful number of steps and independently listen to held-out reconstructed audio.
+
+## Kaggle GPU execution
+
+A non-executed, review-gated starter notebook is included at [`notebooks/kaggle_vocoder_gpu.ipynb`](../notebooks/kaggle_vocoder_gpu.ipynb). Attach a *licensed* Common Voice Vietnamese release as Kaggle input and edit `SOURCE_ROOT`. Both `RIGHTS_REVIEWED` and `APPROVE_VOCODER_TRAINING` default to `False`; the notebook intentionally refuses to train until the operator approves the actual source. It clones this feature branch, imports speaker-disjoint clips, and trains on `cuda` with resumable checkpoints. Kaggle does not provide durable artifact persistence by default: save the private `training_state.pt` outside ephemeral working storage to continue training after a session. No Kaggle GPU job has been executed by this change.
+
 ## Start training (GPU recommended)
 
 ```bash

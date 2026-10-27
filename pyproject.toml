@@ -18,6 +18,7 @@ vietdub-native = "vietdub_native.cli:main"
 vietdub-datasets = "vietdub_native.data_sources:main"
 vietdub-fosd = "vietdub_native.fosd_prepare:main"
 vietdub-audit = "vietdub_native.data_audit:main"
+vietdub-commonvoice-vocoder = "vietdub_native.commonvoice_vocoder:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

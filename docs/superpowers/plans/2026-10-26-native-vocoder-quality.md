@@ -85,3 +85,25 @@ Initial local TDD produced an import error (`vocoder_corpus` absent), then 7 pas
 - [x] **GREEN:** Deterministic step-dependent crops; persisted full optimizer+discriminator state; exact corpus and config signature validation; atomic checkpoint replacement; longer held-out dev reconstruction.
 - [x] **VERIFY:** `PYTHONPATH=src OMP_NUM_THREADS=2 pytest -q tests/test_hifigan_training.py` -> 13 passed on CPU local. Full local checkout is incomplete (earlier source bundles lack latest `symbols.py` and `text_frontend.py`), so GitHub Actions CI is the authoritative full-suite check.
 - [ ] **REVIEW:** Investigate GPU resume, dataset throughput and real approved-corpus listening quality. No claims of intelligible speech until independently listened to.
+
+
+### Task 6: Offline speaker-disjoint Common Voice importer (2026-10-27)
+
+**Files:** `src/vietdub_native/commonvoice_vocoder.py`, `tests/test_commonvoice_vocoder.py`, `docs/NATIVE_VOCODER_TRAINING.md`, `pyproject.toml`
+
+**Interfaces:** `prepare_commonvoice(source_root, output_dir, *, max_clips=10000, seed=7, dev_fraction=0.1, rights_reviewed=False, training_approved=False) -> dict`.
+
+- [x] **RED:** Import of `vietdub_native.commonvoice_vocoder` initially failed; four tests describe review-only defaults, rights-approved speaker-disjoint manifests, input path traversal protection, and minimum speaker count.
+- [x] **GREEN:** Implement local MP3-to-WAV importer with per-speaker deterministic partitioning; do not infer rights from dataset metadata.
+- [x] **VERIFY:** Added an end-to-end fixture test from synthetic MP3 to one-step vocoder train. `PYTHONPATH=src OMP_NUM_THREADS=2 pytest -q tests/test_commonvoice_vocoder.py tests/test_hifigan_training.py` -> 18 passed locally.
+- [ ] **REVIEW:** On authorized actual Common Voice Vietnamese release, inspect speaker metadata availability, quality rejection rate, GPU utilization and attribution needs. CI fixtures are *not* actual Vietnamese speech.
+
+
+### Task 7: Reject near-silent data and provide a GPU execution handoff (2026-10-27)
+
+**Files:** `src/vietdub_native/commonvoice_vocoder.py`, `tests/test_commonvoice_vocoder.py`, `notebooks/kaggle_vocoder_gpu.ipynb`, `docs/NATIVE_VOCODER_TRAINING.md`
+
+- [x] **RED:** Test with near-silent MP3 expects rejected clip and `rejected_low_quality=1`; observed one failure (8 accepted instead of 7).
+- [x] **GREEN:** Inspect decoded WAV for silence/clipping before manifest admission. Record dropped quality/decode clip counts.
+- [x] **VERIFY:** `PYTHONPATH=src OMP_NUM_THREADS=2 pytest -q tests/test_commonvoice_vocoder.py tests/test_hifigan_training.py` -> 19 passed locally. Generated Kaggle notebook with approval checks initially disabled; syntax-validated code cells.
+- [ ] **REVIEW:** GPU run and audible held-out reconstruction are NOT verified. Kaggle notebook requires attached authorized corpus, operator license review and GPU enablement; never claim the generated audio works without listening.
