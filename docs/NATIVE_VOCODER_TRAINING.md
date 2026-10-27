@@ -24,9 +24,23 @@ python -m vietdub_native.hifigan_train \
   --steps 100000 --crop-frames 48 --device cuda
 ```
 
-The number of steps is illustrative, not a quality guarantee. The current trainer is a baseline and lacks true large-scale data loader throughput, resume/scheduler and formal quality benchmarks; these must be addressed before long production runs.
+The number of steps is illustrative, not a quality guarantee. The trainer supports deterministic step-dependent crops and exact optimizer+discriminator resume from a private training-state checkpoint. It still lacks true large-scale DataLoader throughput, schedulers and validated quality benchmarks; do not assume production readiness.
 
-Outputs include `private_checkpoints/hifigan.pt`, `training_history.json`, `evaluation.json` and `dev_reconstructed.wav`. **Never distribute dev source recordings or checkpoints derived from unreviewed voices.** The output reconstructed WAV requires a listener to compare it with the licensed original. A finite GAN loss or the appearance of WAV is not proof of quality.
+To resume interrupted training with the **same manifest and audio bytes, configuration, crop size, optimizer hyperparameters and seed**, keep the original private output directory and run:
+
+```bash
+python -m vietdub_native.hifigan_train \
+  --manifest /path/to/reviewed/vocoder.jsonl \
+  --output-dir /path/to/private/runs/vocoder-v1 \
+  --steps 120000 --crop-frames 48 --device cuda --resume \
+  --checkpoint-every 250 --eval-seconds 5
+```
+
+`--steps` is the **total target optimizer steps**, not additional steps. Each training step uses a deterministically varied crop (replayable after resume). `training_state.pt` saves **both models, both AdamW optimizer states, their hyperparameters, torch RNG and loss history**; atomic checkpoint replacement helps preserve the prior checkpoint on an interrupted write. The resume code rejects any changed corpus manifest or audio content. Store checkpoint files **privately**, not in public CI artifacts. A resuming run must use the same device class and numeric environment for exactly reproducible weights.
+
+The dev reconstruction uses up to `--eval-seconds` of a genuine held-out clip; it is **not** limited to the train crop length. This is a generated reconstruction of the original recording's mel features, **not text-to-speech**. `intelligibility_verified` remains `false` and listening against the original is required. To build a comparison, privately listen to the held-out original already present on your licensed machine; do not commit it or expose it in GitHub artifacts.
+
+Outputs include `private_checkpoints/training_state.pt`, `private_checkpoints/hifigan.pt`, `training_history.json`, `evaluation.json` and `dev_reconstructed.wav`. **Never distribute dev source recordings or checkpoints derived from unreviewed voices.** The output reconstructed WAV requires a listener to compare it with the licensed original. A finite GAN loss or the appearance of WAV is not proof of quality.
 
 ## Superpowers workflow
 

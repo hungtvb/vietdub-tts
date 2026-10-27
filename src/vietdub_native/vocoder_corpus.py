@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -66,19 +67,19 @@ def read_vocoder_manifest(path: str | Path, *, split: str = 'train') -> list[dic
             details = sf.info(str(audio))
             if details.samplerate != 22050 or details.channels != 1 or not 0.4 <= details.duration <= 20:
                 raise CorpusError('Vocoder requires mono 22050 Hz recordings of 0.4–20 seconds')
+            prepared_hash = hashlib.sha256(audio.read_bytes()).hexdigest()
             fingerprint = row.get('source_sha256')
             if not (isinstance(fingerprint, str) and len(fingerprint) == 64
                     and all(c in '0123456789abcdef' for c in fingerprint.lower())):
-                fingerprint = hashlib.sha256(audio.read_bytes()).hexdigest()
+                fingerprint = prepared_hash
             # Never trust a manifest-provided digest as the only leakage key.
             # Compare the prepared audio bytes as well: different declared SHA
             # values must not bypass train/dev separation.
-            prepared_hash = hashlib.sha256(audio.read_bytes()).hexdigest()
             if fingerprint in fingerprints or prepared_hash in fingerprints:
                 raise CorpusError('duplicate source audio across train/dev split or within split')
             fingerprints.add(fingerprint)
             fingerprints.add(prepared_hash)
-            rows.append({**row, 'resolved_audio': str(audio)})
+            rows.append({**row, 'resolved_audio': str(audio), 'prepared_sha256': prepared_hash})
         except (json.JSONDecodeError, OSError, RuntimeError, CorpusError) as exc:
             raise CorpusError(f'{path.name}:{line_number}: {exc}') from exc
     selected = [row for row in rows if row['split'] == split]
@@ -103,12 +104,18 @@ class VocoderWaveDataset(Dataset):
         return len(self.rows)
 
     def __getitem__(self, index):
+        return self.sample_at(index, step=0)
+
+    def sample_at(self, index: int, *, step: int):
+        if step < 0:
+            raise CorpusError('Training step cannot be negative')
         wave = read_audio(self.rows[index]['resolved_audio'], self.cfg.sample_rate)
         crop_samples = self.crop_frames * self.cfg.hop_length
         if wave.numel() < crop_samples:
             raise CorpusError('Recording is shorter than requested crop')
         max_start_frame = (wave.numel() - crop_samples) // self.cfg.hop_length
-        start_frame = (self.seed + index * 7919) % (max_start_frame + 1)
+        # Per-step deterministic crop: vary context while keeping resume reproducible.
+        start_frame = random.Random(f'{self.seed}:{index}:{step}').randrange(max_start_frame + 1)
         start = start_frame * self.cfg.hop_length
         audio = wave[start:start + crop_samples]
         mel = mel_spectrogram(audio, self.cfg)[:self.crop_frames].T.contiguous()

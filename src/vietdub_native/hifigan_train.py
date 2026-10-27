@@ -6,6 +6,8 @@ reconstruction compares waveform fidelity before acoustic-model integration.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import os
 from dataclasses import asdict
 import json
 import random
@@ -26,15 +28,16 @@ def train_hifigan(manifest: str | Path, output_dir: str | Path, *,
                   cfg: Config | None = None, steps: int = 1000,
                   crop_frames: int = 48, generator_channels: int = 128,
                   discriminator_channels: int = 16, lr: float = 2e-4,
-                  device: str = 'cpu', seed: int = 7) -> dict:
+                  device: str = 'cpu', seed: int = 7, resume: bool = False,
+                  checkpoint_every: int = 250, eval_seconds: float = 5.0) -> dict:
     """Train G and MPD from random weights; evaluate on a held-out recording."""
-    if steps < 1 or lr <= 0:
+    if steps < 1 or lr <= 0 or checkpoint_every < 1 or not 0.5 <= eval_seconds <= 15:
         raise ValueError('steps and learning rate must be positive')
     if crop_frames < 8:
         raise ValueError('Need at least 8 mel frames per training crop')
     cfg = cfg or Config()
     output = Path(output_dir).resolve()
-    if output.exists() and any(output.iterdir()):
+    if output.exists() and any(output.iterdir()) and not resume:
         raise ValueError('Output directory is not empty; refuse to overwrite experiments')
     train = VocoderWaveDataset(manifest, cfg=cfg, split='train', crop_frames=crop_frames, seed=seed)
     dev = VocoderWaveDataset(manifest, cfg=cfg, split='dev', crop_frames=crop_frames, seed=seed)
@@ -48,9 +51,56 @@ def train_hifigan(manifest: str | Path, output_dir: str | Path, *,
     disc = MultiPeriodDiscriminator(channels=discriminator_channels).to(device)
     gen_opt = torch.optim.AdamW(gen.parameters(), lr=lr, betas=(.8, .99))
     disc_opt = torch.optim.AdamW(disc.parameters(), lr=lr, betas=(.8, .99))
+    # Bind resume to actual prepared audio bytes AND provenance metadata.
+    manifest_bytes = Path(manifest).read_bytes()
+    inputs = [f'{r["split"]}:{r["prepared_sha256"]}' for r in train.rows + dev.rows]
+    corpus_digest = hashlib.sha256(manifest_bytes + '\n'.join(inputs).encode()).hexdigest()
+    expected = dict(config=asdict(cfg), manifest_sha256=corpus_digest,
+                    generator_channels=generator_channels,
+                    discriminator_channels=discriminator_channels,
+                    crop_frames=crop_frames, lr=lr, seed=seed)
+    checkpoint_dir = output / 'private_checkpoints'
+    state_path = checkpoint_dir / 'training_state.pt'
     losses = []
-    for step in range(steps):
-        mels, original = train[step % len(train)]
+    start_step = 0
+    if resume:
+        if not state_path.is_file():
+            raise ValueError('Cannot resume: training state checkpoint missing')
+        state = torch.load(state_path, map_location=device, weights_only=True)
+        if state.get('type') != 'vietdub_hifigan_training_v2' or any(
+                state.get(k) != v for k, v in expected.items()):
+            raise ValueError('Cannot resume: corpus manifest or configuration changed')
+        start_step = state['step']
+        if steps <= start_step:
+            raise ValueError('Resume target steps must exceed checkpoint step')
+        gen.load_state_dict(state['generator_weights'])
+        disc.load_state_dict(state['discriminator_weights'])
+        gen_opt.load_state_dict(state['generator_optimizer'])
+        disc_opt.load_state_dict(state['discriminator_optimizer'])
+        losses = state['losses']
+        if len(losses) != start_step:
+            raise ValueError('Resume checkpoint history mismatch')
+        torch.set_rng_state(state['torch_rng_state'].cpu())
+        if device.startswith('cuda') and 'cuda_rng_state' in state:
+            torch.cuda.set_rng_state_all(state['cuda_rng_state'])
+
+    def persist(step_number: int) -> None:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        state = {'type': 'vietdub_hifigan_training_v2', **expected,
+                 'step': step_number, 'generator_weights': gen.state_dict(),
+                 'discriminator_weights': disc.state_dict(),
+                 'generator_optimizer': gen_opt.state_dict(),
+                 'discriminator_optimizer': disc_opt.state_dict(),
+                 'torch_rng_state': torch.get_rng_state(), 'losses': losses}
+        if device.startswith('cuda'):
+            state['cuda_rng_state'] = torch.cuda.get_rng_state_all()
+        pending = state_path.with_suffix('.pt.part')
+        torch.save(state, pending)
+        os.replace(pending, state_path)
+
+    output.mkdir(parents=True, exist_ok=True)
+    for step in range(start_step, steps):
+        mels, original = train.sample_at(step % len(train), step=step)
         mels = mels.unsqueeze(0).to(device)
         truth = original.unsqueeze(0).to(device)
         predicted = gen(mels)
@@ -80,19 +130,28 @@ def train_hifigan(manifest: str | Path, output_dir: str | Path, *,
         gen_opt.step()
         losses.append({'step': step + 1, 'generator_loss': round(float(g_loss.detach()), 5),
                        'discriminator_loss': round(float(d_loss.detach()), 5)})
+        if (step + 1) % checkpoint_every == 0:
+            persist(step + 1)
 
-    output.mkdir(parents=True, exist_ok=True)
-    private = output / 'private_checkpoints'
-    private.mkdir()
+    persist(steps)
+    # Keep legacy inference-only artifact, but do not discard optimizer/critic state.
     torch.save({'type': 'vietdub_hifigan_research_v1', 'config': asdict(cfg),
                 'generator_channels': generator_channels, 'step': steps,
-                'weights': gen.cpu().state_dict()}, private / 'hifigan.pt')
+                'weights': {k: v.detach().cpu() for k, v in gen.state_dict().items()}},
+               checkpoint_dir / 'hifigan.pt')
 
-    # Dev data is never used for an optimizer step. Do not write reference audio.
-    dev_mel, dev_wave = dev[0]
+    # Full held-out dev recording (up to eval_seconds), never used in training.
+    # Preserve duration instead of producing an unlistenable 0.2s crop.
+    dev_wave = read_audio(dev.rows[0]['resolved_audio'], cfg.sample_rate)
+    max_samples = min(int(eval_seconds * cfg.sample_rate), len(dev_wave))
+    frames = max_samples // cfg.hop_length
+    if frames < 8:
+        raise RuntimeError('Held-out recording too short for evaluation')
+    dev_wave = dev_wave[:frames * cfg.hop_length]
+    dev_mel = mel_spectrogram(dev_wave, cfg)[:frames].T.contiguous()
     gen.eval()
     with torch.inference_mode():
-        reconstructed = gen(dev_mel.unsqueeze(0)).flatten().numpy()
+        reconstructed = gen(dev_mel.unsqueeze(0).to(device)).flatten().cpu().numpy()
     reference = dev_wave.numpy()
     if not np.isfinite(reconstructed).all():
         raise RuntimeError('Non-finite validation output')
@@ -106,6 +165,9 @@ def train_hifigan(manifest: str | Path, output_dir: str | Path, *,
               'train_generator_loss_last': losses[-1]['generator_loss'],
               'train_discriminator_loss_last': losses[-1]['discriminator_loss'],
               'dev_reconstruction_mae': round(float(np.mean(abs(reconstructed - reference))), 6),
+              'dev_reconstruction_duration_sec': round(len(reconstructed) / cfg.sample_rate, 3),
+              'resume_from_step': start_step,
+              'corpus_manifest_sha256': corpus_digest,
               'dev_reconstruction_ac_rms': round(ac_rms, 6),
               'dev_reconstruction_dc_ratio': round(dc_ratio, 6),
               'sample_rate': cfg.sample_rate,
@@ -122,9 +184,14 @@ def main(argv=None) -> None:
     parser.add_argument('--steps', type=int, default=1000)
     parser.add_argument('--crop-frames', type=int, default=48)
     parser.add_argument('--device', default='cpu')
+    parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--checkpoint-every', type=int, default=250)
+    parser.add_argument('--eval-seconds', type=float, default=5.)
     args = parser.parse_args(argv)
     print(json.dumps(train_hifigan(args.manifest, args.output_dir, steps=args.steps,
-                                   crop_frames=args.crop_frames, device=args.device), indent=2))
+                                   crop_frames=args.crop_frames, device=args.device, resume=args.resume,
+                                   checkpoint_every=args.checkpoint_every,
+                                   eval_seconds=args.eval_seconds), indent=2))
 
 
 if __name__ == '__main__':

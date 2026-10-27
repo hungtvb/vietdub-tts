@@ -73,3 +73,15 @@
 ## Current Execution Evidence
 
 Initial local TDD produced an import error (`vocoder_corpus` absent), then 7 passing tests. Added duplicate-content test failed as expected, fixed actual byte-hash duplicate detection, then 9 local tests passed. GitHub Actions must independently confirm the full suite before PR completion.
+
+
+### Task 5: Resumable GAN training and audible-length held-out evaluation (2026-10-27)
+
+**Files:** `src/vietdub_native/vocoder_corpus.py`, `src/vietdub_native/hifigan_train.py`, `tests/test_hifigan_training.py`, `docs/NATIVE_VOCODER_TRAINING.md`
+
+**Interfaces:** `VocoderWaveDataset.sample_at(index, *, step) -> (mel, waveform)` and `train_hifigan(..., resume=False, checkpoint_every=250, eval_seconds=5.0) -> dict`.
+
+- [x] **RED:** Added four failing tests: per-step crop variability with deterministic replay, one-shot versus resumed model-weight equivalence, rejection of changed manifest without clobbering checkpoint, and longer held-out dev output. Observed all four fail locally for the intended missing behavior.
+- [x] **GREEN:** Deterministic step-dependent crops; persisted full optimizer+discriminator state; exact corpus and config signature validation; atomic checkpoint replacement; longer held-out dev reconstruction.
+- [x] **VERIFY:** `PYTHONPATH=src OMP_NUM_THREADS=2 pytest -q tests/test_hifigan_training.py` -> 13 passed on CPU local. Full local checkout is incomplete (earlier source bundles lack latest `symbols.py` and `text_frontend.py`), so GitHub Actions CI is the authoritative full-suite check.
+- [ ] **REVIEW:** Investigate GPU resume, dataset throughput and real approved-corpus listening quality. No claims of intelligible speech until independently listened to.

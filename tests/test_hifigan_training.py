@@ -117,3 +117,64 @@ def test_actor_recording_requires_voice_training_consent(tmp_path):
     manifest = _corpus(tmp_path, dataset_source='actor_recordings')
     with pytest.raises(CorpusError, match='consent'):
         read_vocoder_manifest(manifest, split='train')
+
+
+def test_training_crop_changes_with_step_but_is_reproducible(tmp_path):
+    manifest = _corpus(tmp_path)
+    cfg = Config(n_fft=256, n_mels=16)
+    dataset = VocoderWaveDataset(manifest, cfg, split='train', crop_frames=16, seed=7)
+    first_mel, first_audio = dataset.sample_at(0, step=0)
+    second_mel, second_audio = dataset.sample_at(0, step=1)
+    repeated_mel, repeated_audio = dataset.sample_at(0, step=0)
+    assert torch.equal(first_audio, repeated_audio)
+    assert torch.equal(first_mel, repeated_mel)
+    assert not torch.equal(first_audio, second_audio)
+
+
+def test_resume_preserves_both_optimizers_and_checkpoint_state(tmp_path):
+    manifest = _corpus(tmp_path)
+    cfg = Config(n_fft=256, n_mels=16)
+    options = dict(cfg=cfg, crop_frames=16, generator_channels=16,
+                   discriminator_channels=8, device='cpu', seed=19)
+    fresh = train_hifigan(manifest, tmp_path/'fresh', steps=2, **options)
+    one_step = train_hifigan(manifest, tmp_path/'resumed', steps=1, **options)
+    resumed = train_hifigan(manifest, tmp_path/'resumed', steps=2, resume=True, **options)
+    assert fresh['steps'] == resumed['steps'] == 2
+    checkpoint_fresh = torch.load(tmp_path/'fresh'/'private_checkpoints'/'training_state.pt', weights_only=True)
+    checkpoint_resume = torch.load(tmp_path/'resumed'/'private_checkpoints'/'training_state.pt', weights_only=True)
+    assert checkpoint_resume['step'] == 2
+    assert checkpoint_resume['discriminator_weights']
+    assert checkpoint_resume['discriminator_optimizer']
+    assert checkpoint_resume['generator_optimizer']
+    for name, tensor in checkpoint_fresh['generator_weights'].items():
+        assert torch.allclose(tensor, checkpoint_resume['generator_weights'][name], atol=1e-7), name
+    assert one_step['steps'] == 1
+
+
+def test_resume_rejects_changed_manifest_without_overwriting_checkpoint(tmp_path):
+    manifest = _corpus(tmp_path)
+    cfg = Config(n_fft=256, n_mels=16)
+    options = dict(cfg=cfg, crop_frames=16, generator_channels=16,
+                   discriminator_channels=8, device='cpu')
+    train_hifigan(manifest, tmp_path/'out', steps=1, **options)
+    before = (tmp_path/'out'/'private_checkpoints'/'training_state.pt').read_bytes()
+    rows = [json.loads(x) for x in manifest.read_text().splitlines()]
+    rows[0]['license'] = 'changed-license'
+    manifest.write_text(''.join(json.dumps(x)+'\n' for x in rows))
+    with pytest.raises((ValueError, CorpusError), match='manifest|corpus'):
+        train_hifigan(manifest, tmp_path/'out', steps=2, resume=True, **options)
+    assert before == (tmp_path/'out'/'private_checkpoints'/'training_state.pt').read_bytes()
+
+
+def test_dev_reconstruction_uses_longer_independent_audio_not_train_crop(tmp_path):
+    manifest = _corpus(tmp_path)
+    t = np.arange(2 * 22050) / 22050
+    sf.write(tmp_path/'2.wav', (0.12*np.sin(2*np.pi*215*t)).astype('float32'), 22050)
+    cfg = Config(n_fft=256, n_mels=16)
+    result = train_hifigan(manifest, tmp_path/'longdev', cfg=cfg, steps=1,
+                           crop_frames=16, generator_channels=16,
+                           discriminator_channels=8, device='cpu')
+    info = sf.info(tmp_path/'longdev'/'dev_reconstructed.wav')
+    assert info.duration >= 1.9
+    assert result['dev_reconstruction_duration_sec'] >= 1.9
+    assert result['intelligibility_verified'] is False
