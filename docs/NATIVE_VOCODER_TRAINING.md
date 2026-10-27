@@ -18,7 +18,7 @@ The trainer requires two or more approved train clips and at least one approved 
 
 Official catalog: https://commonvoice.mozilla.org/ (the Vietnamese scripted-speech release is listed as CC0-1.0). Download the release **through the official Mozilla Data Collective**, verify its exact version/license, and unpack it privately so that `validated.tsv` and `clips/*.mp3` are present. Do not bypass login/access terms or upload source voice files to this public GitHub repository.
 
-Vocoder-only training does **not** need transcriptions or forced alignment. The preparer uses `client_id` only to keep speakers out of both train and dev, and never writes raw client IDs to its output. It also rejects silent/clipped clips and reports quality rejects. Rows without known `client_id` are skipped rather than silently treated as different people. It records original audio digests and converts bounded clips to mono 22050 Hz WAV. Source files remain untouched.
+Vocoder-only training does **not** need transcriptions or forced alignment. The preparer uses `client_id` only to keep speakers out of both train and dev, reserves clips from two distinct train speakers for even tiny bounded datasets, and never writes raw client IDs to its output. It also rejects silent/clipped clips and reports quality rejects. Rows without known `client_id` are skipped rather than silently treated as different people. It records original audio digests and converts bounded clips to mono 22050 Hz WAV. Source files remain untouched.
 
 First produce an **unapproved review-only dataset**:
 

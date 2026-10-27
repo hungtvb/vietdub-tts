@@ -107,3 +107,13 @@ Initial local TDD produced an import error (`vocoder_corpus` absent), then 7 pas
 - [x] **GREEN:** Inspect decoded WAV for silence/clipping before manifest admission. Record dropped quality/decode clip counts.
 - [x] **VERIFY:** `PYTHONPATH=src OMP_NUM_THREADS=2 pytest -q tests/test_commonvoice_vocoder.py tests/test_hifigan_training.py` -> 19 passed locally. Generated Kaggle notebook with approval checks initially disabled; syntax-validated code cells.
 - [ ] **REVIEW:** GPU run and audible held-out reconstruction are NOT verified. Kaggle notebook requires attached authorized corpus, operator license review and GPU enablement; never claim the generated audio works without listening.
+
+
+### Task 8: Superpowers review fix — train-speaker diversity (2026-10-27)
+
+**Files:** `src/vietdub_native/commonvoice_vocoder.py`, `tests/test_commonvoice_vocoder.py`
+
+- [x] **RED:** Fixed-seed minimal corpus (`seed=4`, 3 speakers, `max_clips=3`) used only one distinct train speaker; observed assertion failure: expected 2, got 1.
+- [x] **GREEN:** Reserve one recording each from two distinct train speakers and one dev speaker before filling bounded slots.
+- [x] **VERIFY:** `PYTHONPATH=src OMP_NUM_THREADS=2 pytest -q tests/test_commonvoice_vocoder.py tests/test_hifigan_training.py` -> 20 passed on CPU local.
+- [ ] **REVIEW:** Real Common Voice `client_id` values and speaker consistency remain external facts; user must verify source and complete an actual GPU training run.

@@ -95,12 +95,18 @@ def prepare_commonvoice(source_root: str | Path, output_dir: str | Path, *,
     dev_pool.sort(key=lambda item: _ranking(seed, 'dev:' + item[0]))
     if len(train_pool) < 2 or not dev_pool:
         raise ValueError('Insufficient train and dev recordings after speaker split')
-    # Guarantee that a small bounded import still contains a held-out dev clip.
-    ordered = [('train', train_pool[0]), ('train', train_pool[1]), ('dev', dev_pool[0])]
-    rest = ([('train', row) for row in train_pool[2:]]
-            + [('dev', row) for row in dev_pool[1:]])
+    # Reserve samples from two different train speakers plus a held-out
+    # speaker before filling the remaining bounded import; transcript/row
+    # order or a speaker's clip volume must not defeat the separation.
+    train_speakers = [s for s in speakers if s not in dev_ids]
+    reserved = [('train', min(groups[s], key=lambda item: _ranking(seed, item[0])))
+                for s in train_speakers[:2]]
+    reserved.append(('dev', dev_pool[0]))
+    selected_names = {item[0] for _, item in reserved}
+    rest = ([('train', row) for row in train_pool if row[0] not in selected_names]
+            + [('dev', row) for row in dev_pool if row[0] not in selected_names])
     rest.sort(key=lambda pair: _ranking(seed, pair[0] + ':' + pair[1][0]))
-    ordered.extend(rest)
+    ordered = reserved + rest
 
     out_audio = output / 'audio'
     out_audio.mkdir(parents=True)

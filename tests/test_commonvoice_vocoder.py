@@ -106,3 +106,11 @@ def test_near_silent_mp3_is_excluded_before_vocoder_training(tmp_path):
     report = prepare_commonvoice(root,tmp_path/'prepared', max_clips=8)
     assert report['clips_prepared'] == 7
     assert report['rejected_low_quality'] == 1
+
+
+def test_tiny_bounded_import_retains_two_distinct_train_speakers(tmp_path):
+    root = _fake_commonvoice(tmp_path, speakers=3, utterances=3)
+    report = prepare_commonvoice(root, tmp_path/'prepared', max_clips=3, seed=4)
+    assert report['train_clips'] == 2 and report['dev_clips'] == 1
+    assert report['train_speakers'] == 2
+    assert report['dev_speakers'] == 1
