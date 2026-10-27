@@ -23,17 +23,18 @@ def read_audio(path: str | Path, sample_rate: int) -> torch.Tensor:
     return torch.from_numpy(signal.copy())
 
 
-@lru_cache(maxsize=8)
-def _mel_transform(sr: int, n_fft: int, hop: int, n_mels: int):
+@lru_cache(maxsize=16)
+def _mel_transform(sr: int, n_fft: int, hop: int, n_mels: int, device: str = "cpu"):
+    """Keep one analysis kernel per sample configuration AND tensor device."""
     return torchaudio.transforms.MelSpectrogram(
         sample_rate=sr, n_fft=n_fft, hop_length=hop, win_length=n_fft,
         n_mels=n_mels, power=2.0, center=True, norm="slaney", mel_scale="slaney"
-    )
+    ).to(device)
 
 
 def mel_spectrogram(wave: torch.Tensor, cfg: Config) -> torch.Tensor:
     """Output [frames, n_mels], natural log power mel."""
-    transform = _mel_transform(cfg.sample_rate, cfg.n_fft, cfg.hop_length, cfg.n_mels)
+    transform = _mel_transform(cfg.sample_rate, cfg.n_fft, cfg.hop_length, cfg.n_mels, str(wave.device))
     return transform(wave.float()).clamp_min(1e-5).log().transpose(-1, -2)
 
 

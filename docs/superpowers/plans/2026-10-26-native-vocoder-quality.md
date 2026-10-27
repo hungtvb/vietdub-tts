@@ -132,3 +132,13 @@ Initial local TDD produced an import error (`vocoder_corpus` absent), then 7 pas
 - [x] **GREEN:** Record silence-relative log-mel reconstruction loss, held-out source RMS and clipping fraction; explicitly reject v2 resume into v3 as incompatible.
 - [x] **VERIFY:** `PYTHONPATH=src OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 pytest -q tests/test_hifigan_training.py tests/test_commonvoice_vocoder.py` -> 25 passed on CPU local. Full remote CI required for repository-wide verification.
 - [ ] **REVIEW:** Run v3 on sufficiently long rights-approved human Vietnamese recordings using GPU; compare multi-speaker held-out originals/reconstructions by listening. Only then report any audible quality gain.
+
+### Task 10: Resolve GPU log-mel transform device mismatch (2026-10-27)
+
+**Files:** `src/vietdub_native/audio.py`, `tests/test_hifigan_training.py`,
+`docs/NATIVE_VOCODER_TRAINING.md`.
+
+- [x] **RED:** New test called `_mel_transform(..., 'cpu')` to require device-aware caching; raised `TypeError` because the old transform factory ignored device.
+- [x] **GREEN:** Cache mel transform by requested device and analysis params; put filter bank/window on the same device as generated waveform.
+- [x] **VERIFY:** `PYTHONPATH=src OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 pytest -q tests/test_hifigan_training.py tests/test_commonvoice_vocoder.py` -> 26 passed, 1 CUDA test skipped, CPU local.
+- [ ] **GPU CHECK:** Run the CUDA gradient test and full vocoder training on a GPU; skipped test is NOT evidence of a completed CUDA run.

@@ -252,3 +252,26 @@ def test_refuses_to_resume_v2_checkpoint_with_v3_model(tmp_path):
     torch.save(state, path)
     with pytest.raises(ValueError, match='version|schema|checkpoint'):
         train_hifigan(manifest, out, resume=True, **{**options, 'steps': 2})
+
+
+def test_mel_transform_is_cached_by_requested_device():
+    from vietdub_native.audio import _mel_transform
+    from vietdub_native.hifigan import mel_reconstruction_loss
+    cfg = Config(n_fft=256, n_mels=16)
+    transform = _mel_transform(cfg.sample_rate, cfg.n_fft, cfg.hop_length, cfg.n_mels, 'cpu')
+    assert all(buffer.device.type == 'cpu' for buffer in transform.buffers())
+    assert _mel_transform(cfg.sample_rate, cfg.n_fft, cfg.hop_length, cfg.n_mels, 'cpu') is transform
+    source = torch.randn(1, 4096, requires_grad=True)
+    mel_reconstruction_loss(source, source.detach() * .8, cfg).backward()
+    assert torch.isfinite(source.grad).all()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='GPU not available on CI runner')
+def test_cuda_logmel_loss_has_no_device_mismatch():
+    from vietdub_native.hifigan import mel_reconstruction_loss
+    cfg = Config(n_fft=256, n_mels=16)
+    fake = torch.randn(1, 4096, device='cuda', requires_grad=True)
+    target = torch.randn_like(fake)
+    loss = mel_reconstruction_loss(fake, target, cfg)
+    loss.backward()
+    assert torch.isfinite(fake.grad).all()

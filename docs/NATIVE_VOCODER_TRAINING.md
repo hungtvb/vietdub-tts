@@ -105,3 +105,13 @@ listen to multiple held-out speech clips and compare with originals.
 **Critical remaining bottleneck:** No real licensed Vietnamese corpus or GPU
 training has been executed by this ChatGPT run. CI tests use synthetic sine
 waveforms; passing them cannot constitute a speech-quality claim.
+
+### GPU log-mel device safety
+
+The differentiable mel reconstruction objective analyzes *generated tensors on
+CUDA* as well as CPU reference data. `audio.mel_spectrogram` now caches its
+analysis transform by tensor device and hyperparameters, moving filter-bank
+buffers to the waveform's device. Previously the cached transform was always
+on CPU, which could cause a CUDA device mismatch during loss evaluation.
+A CUDA-specific backward test is provided and is **skipped on CPU runners**.
+Actual CUDA training remains unverified until a GPU run completes.
