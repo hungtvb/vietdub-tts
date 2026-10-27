@@ -14,6 +14,19 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install .[dev,api] --extra-index-url https://download.pytorch.org/whl/cpu
       - run: python -m compileall -q src tests
-      - name: Install ffmpeg for real MP3 decode coverage
-        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+      - name: Install portable ffmpeg for MP3 corpus tests
+        run: |
+          pip install 'imageio-ffmpeg>=0.5'
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import imageio_ffmpeg
+          binary = Path(imageio_ffmpeg.get_ffmpeg_exe())
+          target = Path(os.environ["RUNNER_TEMP"]) / "ffmpeg-bin"
+          target.mkdir(parents=True, exist_ok=True)
+          (target / "ffmpeg").symlink_to(binary)
+          with open(os.environ["GITHUB_PATH"], "a") as handle:
+              handle.write(str(target) + "\n")
+          print("Using ffmpeg:", binary)
+          PY
       - run: pytest -q
