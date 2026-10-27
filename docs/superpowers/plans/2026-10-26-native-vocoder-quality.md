@@ -117,3 +117,18 @@ Initial local TDD produced an import error (`vocoder_corpus` absent), then 7 pas
 - [x] **GREEN:** Reserve one recording each from two distinct train speakers and one dev speaker before filling bounded slots.
 - [x] **VERIFY:** `PYTHONPATH=src OMP_NUM_THREADS=2 pytest -q tests/test_commonvoice_vocoder.py tests/test_hifigan_training.py` -> 20 passed on CPU local.
 - [ ] **REVIEW:** Real Common Voice `client_id` values and speaker consistency remain external facts; user must verify source and complete an actual GPU training run.
+
+### Task 9: Improve spectral fidelity and measure against silence (2026-10-27)
+
+**Files:** `src/vietdub_native/hifigan.py`, `src/vietdub_native/hifigan_train.py`,
+`tests/test_hifigan_training.py`, `docs/NATIVE_VOCODER_TRAINING.md`.
+
+**Interfaces:** `MultiScaleDiscriminator(channels, scales=3)`,
+`JointDiscriminator(channels)`, `mel_reconstruction_loss(predicted, reference, cfg)`.
+
+- [x] **RED:** Three tests failed as expected: missing `MultiScaleDiscriminator`, missing `mel_reconstruction_loss`, and checkpoint/telemetry still using v2 period-only training.
+- [x] **GREEN:** Add scaled waveform critics; optimize joint LSGAN discriminators with generator log-mel L1 + STFT + adversarial and feature-matching objectives; freeze critics during generator backward; checkpoint the new critic weights with schema v3.
+- [x] **RED:** Two additional tests failed as expected: no silence-relative dev reconstruction measurement, and old v2 checkpoint rejection gave misleading corpus-change diagnostics.
+- [x] **GREEN:** Record silence-relative log-mel reconstruction loss, held-out source RMS and clipping fraction; explicitly reject v2 resume into v3 as incompatible.
+- [x] **VERIFY:** `PYTHONPATH=src OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 pytest -q tests/test_hifigan_training.py tests/test_commonvoice_vocoder.py` -> 25 passed on CPU local. Full remote CI required for repository-wide verification.
+- [ ] **REVIEW:** Run v3 on sufficiently long rights-approved human Vietnamese recordings using GPU; compare multi-speaker held-out originals/reconstructions by listening. Only then report any audible quality gain.

@@ -178,3 +178,77 @@ def test_dev_reconstruction_uses_longer_independent_audio_not_train_crop(tmp_pat
     assert info.duration >= 1.9
     assert result['dev_reconstruction_duration_sec'] >= 1.9
     assert result['intelligibility_verified'] is False
+
+
+def test_multi_scale_discriminator_tracks_time_scales_and_generator_gradient():
+    from vietdub_native.hifigan import MultiScaleDiscriminator
+    msd = MultiScaleDiscriminator(channels=8, scales=3)
+    wave = torch.randn(2, 3072, requires_grad=True)
+    scores, features = msd(wave)
+    assert len(scores) == len(features) == 3
+    assert len({tuple(f[0].shape) for f in features}) == 3  # progressively downsampled
+    loss = sum(s.square().mean() for s in scores)
+    loss.backward()
+    assert wave.grad is not None and wave.grad.abs().sum() > 0
+
+
+def test_mel_reconstruction_loss_is_differentiable_and_exact_for_same_wave():
+    from vietdub_native.hifigan import mel_reconstruction_loss
+    cfg = Config(n_fft=256, n_mels=16)
+    wave = torch.randn(1, 4096).clamp(-.9, .9)
+    target = wave.detach()
+    identity = mel_reconstruction_loss(wave, target, cfg)
+    assert identity.item() < 1e-7
+    noisy = (target + .04*torch.randn_like(target)).detach().requires_grad_(True)
+    loss = mel_reconstruction_loss(noisy, target, cfg)
+    assert loss.item() > 0.001
+    loss.backward()
+    assert noisy.grad is not None and torch.isfinite(noisy.grad).all()
+    assert noisy.grad.abs().sum() > 0
+
+
+def test_training_reports_both_discriminator_types_and_mel_fidelity(tmp_path):
+    manifest = _corpus(tmp_path)
+    cfg = Config(n_fft=256, n_mels=16)
+    result = train_hifigan(manifest, tmp_path/'v3', cfg=cfg, steps=1,
+                           crop_frames=16, generator_channels=16,
+                           discriminator_channels=8, device='cpu')
+    ckpt = torch.load(tmp_path/'v3'/'private_checkpoints'/'training_state.pt', weights_only=True)
+    assert ckpt['type'] == 'vietdub_hifigan_training_v3'
+    assert any(k.startswith('period.') for k in ckpt['discriminator_weights'])
+    assert any(k.startswith('scale.') for k in ckpt['discriminator_weights'])
+    history = json.loads((tmp_path/'v3'/'training_history.json').read_text())
+    assert history[0]['mel_reconstruction_loss'] >= 0
+    assert history[0]['discriminator_loss'] >= 0
+    assert 'dev_logmel_l1' in result
+    assert result['dev_logmel_l1'] >= 0
+    assert result['intelligibility_verified'] is False
+
+
+def test_dev_report_compares_to_silent_baseline_without_claiming_intelligibility(tmp_path):
+    manifest = _corpus(tmp_path)
+    cfg = Config(n_fft=256, n_mels=16)
+    report = train_hifigan(manifest, tmp_path/'diagnostic', cfg=cfg, steps=1,
+                           crop_frames=16, generator_channels=16,
+                           discriminator_channels=8)
+    assert report['dev_silence_logmel_l1'] > 0
+    assert report['dev_logmel_l1_ratio_to_silence'] >= 0
+    assert 0 <= report['dev_clipped_fraction'] <= 1
+    assert report['dev_original_rms'] > 0
+    assert report['intelligibility_verified'] is False
+    assert report['production_approved'] is False
+
+
+def test_refuses_to_resume_v2_checkpoint_with_v3_model(tmp_path):
+    manifest = _corpus(tmp_path)
+    cfg = Config(n_fft=256, n_mels=16)
+    options = dict(cfg=cfg, steps=1, crop_frames=16, generator_channels=16,
+                   discriminator_channels=8)
+    out = tmp_path/'versioned'
+    train_hifigan(manifest, out, **options)
+    path = out/'private_checkpoints'/'training_state.pt'
+    state = torch.load(path, weights_only=True)
+    state['type'] = 'vietdub_hifigan_training_v2'
+    torch.save(state, path)
+    with pytest.raises(ValueError, match='version|schema|checkpoint'):
+        train_hifigan(manifest, out, resume=True, **{**options, 'steps': 2})

@@ -76,3 +76,32 @@ Outputs include `private_checkpoints/training_state.pt`, `private_checkpoints/hi
 ## Superpowers workflow
 
 Apply the upstream [`obra/superpowers` using-superpowers](https://github.com/obra/superpowers/tree/main/skills/using-superpowers) with brainstorming/design -> writing-plans -> isolated branch -> TDD -> verification -> code review. Read the design and plan under `docs/superpowers/` before changing the feature. Do not merge merely because CI passes.
+
+## Training-quality update: joint period/scale critics (checkpoint v3)
+
+The next experiment uses **both** multi-period and multi-scale waveform
+critics. The generator objective includes **differentiable log-mel L1** in
+addition to multi-resolution STFT, feature matching and adversarial losses.
+These changes constrain phonetic/spectral structure more directly than the
+period-only experiment, but are **not evidence of intelligible Vietnamese**.
+The scale critics are lightweight, HiFi-GAN-inspired and not a reproduction
+of any upstream pretrained architecture or weights.
+
+**Checkpoint compatibility:** This changes discriminator parameters and
+optimizer state. The checkpoint schema is now
+`vietdub_hifigan_training_v3`. Do **not** `--resume` from v2 checkpoints;
+start a **new private output directory** for the v3 architecture. Within a v3
+run, identical input/audio/config resumability is still tested. Do not copy
+an old `training_state.pt` and assume it has been converted.
+
+The held-out `evaluation.json` now includes `dev_logmel_l1`,
+`dev_silence_logmel_l1`, `dev_logmel_l1_ratio_to_silence`, source RMS and
+reconstruction clipping fraction. A relative log-mel error smaller than 1
+means the generated audio is spectrally closer to the reference than silence
+under this **one metric**; it does **not** mean intelligible speech. Before
+marking the vocoder acceptable, a reviewer with the appropriate rights must
+listen to multiple held-out speech clips and compare with originals.
+
+**Critical remaining bottleneck:** No real licensed Vietnamese corpus or GPU
+training has been executed by this ChatGPT run. CI tests use synthetic sine
+waveforms; passing them cannot constitute a speech-quality claim.

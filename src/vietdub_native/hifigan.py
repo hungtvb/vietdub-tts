@@ -103,3 +103,72 @@ def generator_loss(fake_scores, fake_features, real_features):
                    for real, fake in zip(real_features, fake_features)
                    for a, b in zip(real, fake))
     return adversarial + 2.0 * matching
+
+
+class ScaleCritic(nn.Module):
+    """One waveform-resolution critic; returns intermediate feature maps."""
+
+    def __init__(self, channels: int = 16):
+        super().__init__()
+        self.convs = nn.ModuleList([
+            nn.Conv1d(1, channels, 15, padding=7),
+            nn.Conv1d(channels, channels * 2, 41, stride=4, padding=20, groups=4),
+            nn.Conv1d(channels * 2, channels * 4, 41, stride=4, padding=20, groups=4),
+            nn.Conv1d(channels * 4, channels * 4, 5, padding=2),
+        ])
+        self.final = nn.Conv1d(channels * 4, 1, 3, padding=1)
+
+    def forward(self, waveform: torch.Tensor):
+        if waveform.ndim != 2:
+            raise ValueError('Expected waveform [batch, samples]')
+        x = waveform.unsqueeze(1)
+        features = []
+        for conv in self.convs:
+            x = F.leaky_relu(conv(x), .1)
+            features.append(x)
+        return self.final(x).flatten(1), features
+
+
+class MultiScaleDiscriminator(nn.Module):
+    """Multiple waveform resolutions complement the periodic waveform critics."""
+
+    def __init__(self, *, channels: int = 16, scales: int = 3):
+        super().__init__()
+        if channels < 4 or channels % 4 or not 1 <= scales <= 4:
+            raise ValueError('channels must be a multiple of four; scales 1..4')
+        self.critics = nn.ModuleList(ScaleCritic(channels) for _ in range(scales))
+        self.downsample = nn.AvgPool1d(kernel_size=4, stride=2, padding=1)
+
+    def forward(self, waveform: torch.Tensor):
+        if waveform.ndim != 2:
+            raise ValueError('Expected waveform [batch, samples]')
+        scores, features = [], []
+        x = waveform
+        for critic in self.critics:
+            score, hidden = critic(x)
+            scores.append(score)
+            features.append(hidden)
+            x = self.downsample(x.unsqueeze(1)).squeeze(1)
+        return scores, features
+
+
+class JointDiscriminator(nn.Module):
+    """Joint multi-period and multi-scale critics, one optimizer/checkpoint."""
+
+    def __init__(self, *, channels: int = 16):
+        super().__init__()
+        self.period = MultiPeriodDiscriminator(channels=channels)
+        self.scale = MultiScaleDiscriminator(channels=channels)
+
+    def forward(self, waveform: torch.Tensor):
+        period_scores, period_features = self.period(waveform)
+        scale_scores, scale_features = self.scale(waveform)
+        return period_scores + scale_scores, period_features + scale_features
+
+
+def mel_reconstruction_loss(predicted: torch.Tensor, reference: torch.Tensor, cfg: Config) -> torch.Tensor:
+    """Differentiable log-mel fidelity; identical waveforms have zero loss."""
+    if predicted.ndim != 2 or predicted.shape != reference.shape:
+        raise ValueError('Expected matched [batch, samples] waveform tensors')
+    from .audio import mel_spectrogram
+    return F.l1_loss(mel_spectrogram(predicted, cfg), mel_spectrogram(reference, cfg))

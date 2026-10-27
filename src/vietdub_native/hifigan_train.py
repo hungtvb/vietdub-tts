@@ -19,7 +19,7 @@ import torch
 
 from .config import Config
 from .audio import mel_spectrogram, read_audio
-from .hifigan import HiFiGANGenerator, MultiPeriodDiscriminator, discriminator_loss, generator_loss
+from .hifigan import HiFiGANGenerator, JointDiscriminator, discriminator_loss, generator_loss, mel_reconstruction_loss
 from .vocoder import spectral_loss
 from .vocoder_corpus import CorpusError, VocoderWaveDataset
 
@@ -30,7 +30,7 @@ def train_hifigan(manifest: str | Path, output_dir: str | Path, *,
                   discriminator_channels: int = 16, lr: float = 2e-4,
                   device: str = 'cpu', seed: int = 7, resume: bool = False,
                   checkpoint_every: int = 250, eval_seconds: float = 5.0) -> dict:
-    """Train G and MPD from random weights; evaluate on a held-out recording."""
+    """Train G with joint period/scale critics; evaluate a held-out recording."""
     if steps < 1 or lr <= 0 or checkpoint_every < 1 or not 0.5 <= eval_seconds <= 15:
         raise ValueError('steps and learning rate must be positive')
     if crop_frames < 8:
@@ -48,7 +48,7 @@ def train_hifigan(manifest: str | Path, output_dir: str | Path, *,
     random.seed(seed)
     torch.set_num_threads(min(torch.get_num_threads(), 2))
     gen = HiFiGANGenerator(cfg, channels=generator_channels).to(device)
-    disc = MultiPeriodDiscriminator(channels=discriminator_channels).to(device)
+    disc = JointDiscriminator(channels=discriminator_channels).to(device)
     gen_opt = torch.optim.AdamW(gen.parameters(), lr=lr, betas=(.8, .99))
     disc_opt = torch.optim.AdamW(disc.parameters(), lr=lr, betas=(.8, .99))
     # Bind resume to actual prepared audio bytes AND provenance metadata.
@@ -67,8 +67,9 @@ def train_hifigan(manifest: str | Path, output_dir: str | Path, *,
         if not state_path.is_file():
             raise ValueError('Cannot resume: training state checkpoint missing')
         state = torch.load(state_path, map_location=device, weights_only=True)
-        if state.get('type') != 'vietdub_hifigan_training_v2' or any(
-                state.get(k) != v for k, v in expected.items()):
+        if state.get('type') != 'vietdub_hifigan_training_v3':
+            raise ValueError('Cannot resume: checkpoint schema version changed (v3 joint critics); start a new private output directory')
+        if any(state.get(k) != v for k, v in expected.items()):
             raise ValueError('Cannot resume: corpus manifest or configuration changed')
         start_step = state['step']
         if steps <= start_step:
@@ -86,7 +87,7 @@ def train_hifigan(manifest: str | Path, output_dir: str | Path, *,
 
     def persist(step_number: int) -> None:
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        state = {'type': 'vietdub_hifigan_training_v2', **expected,
+        state = {'type': 'vietdub_hifigan_training_v3', **expected,
                  'step': step_number, 'generator_weights': gen.state_dict(),
                  'discriminator_weights': disc.state_dict(),
                  'generator_optimizer': gen_opt.state_dict(),
@@ -116,20 +117,27 @@ def train_hifigan(manifest: str | Path, output_dir: str | Path, *,
         torch.nn.utils.clip_grad_norm_(disc.parameters(), 1.)
         disc_opt.step()
 
+        for parameter in disc.parameters():
+            parameter.requires_grad_(False)
         fake_scores, fake_features = disc(predicted)
         with torch.no_grad():
             _, real_features = disc(truth)
         stft = spectral_loss(predicted, truth)
+        mel_loss = mel_reconstruction_loss(predicted, truth, cfg)
         g_loss = (generator_loss(fake_scores, fake_features, real_features)
-                  + 4.0 * stft + 0.5 * (predicted - truth).abs().mean())
+                  + 4.0 * stft + 10.0 * mel_loss
+                  + 0.5 * (predicted - truth).abs().mean())
         if not torch.isfinite(g_loss):
             raise RuntimeError('Non-finite generator loss')
         gen_opt.zero_grad(set_to_none=True)
         g_loss.backward()
         torch.nn.utils.clip_grad_norm_(gen.parameters(), 1.)
         gen_opt.step()
+        for parameter in disc.parameters():
+            parameter.requires_grad_(True)
         losses.append({'step': step + 1, 'generator_loss': round(float(g_loss.detach()), 5),
-                       'discriminator_loss': round(float(d_loss.detach()), 5)})
+                       'discriminator_loss': round(float(d_loss.detach()), 5),
+                       'mel_reconstruction_loss': round(float(mel_loss.detach()), 5)})
         if (step + 1) % checkpoint_every == 0:
             persist(step + 1)
 
@@ -156,6 +164,14 @@ def train_hifigan(manifest: str | Path, output_dir: str | Path, *,
     if not np.isfinite(reconstructed).all():
         raise RuntimeError('Non-finite validation output')
     sf.write(output / 'dev_reconstructed.wav', reconstructed, cfg.sample_rate, subtype='PCM_16')
+    with torch.inference_mode():
+        dev_logmel_l1 = float(mel_reconstruction_loss(
+            torch.from_numpy(reconstructed).unsqueeze(0),
+            torch.from_numpy(reference.copy()).unsqueeze(0), cfg))
+    with torch.inference_mode():
+        silence_logmel_l1 = float(mel_reconstruction_loss(
+            torch.zeros((1, len(reference)), dtype=torch.float32),
+            torch.from_numpy(reference.copy()).unsqueeze(0), cfg))
     ac_rms = float(np.std(reconstructed))
     dc_ratio = float(abs(np.mean(reconstructed)) / max(np.sqrt(np.mean(reconstructed ** 2)), 1e-10))
     report = {'status': 'RECONSTRUCTION_REQUIRES_LISTENING_REVIEW',
@@ -165,6 +181,13 @@ def train_hifigan(manifest: str | Path, output_dir: str | Path, *,
               'train_generator_loss_last': losses[-1]['generator_loss'],
               'train_discriminator_loss_last': losses[-1]['discriminator_loss'],
               'dev_reconstruction_mae': round(float(np.mean(abs(reconstructed - reference))), 6),
+              'dev_logmel_l1': round(dev_logmel_l1, 6),
+              'dev_silence_logmel_l1': round(silence_logmel_l1, 6),
+              'dev_logmel_l1_ratio_to_silence': round(dev_logmel_l1 / max(silence_logmel_l1, 1e-7), 6),
+              'dev_original_rms': round(float(np.sqrt(np.mean(reference ** 2))), 6),
+              'dev_clipped_fraction': round(float(np.mean(np.abs(reconstructed) >= 0.999)), 6),
+              'discriminator_architecture': 'joint_period_scale_v1',
+              'training_checkpoint_format': 'vietdub_hifigan_training_v3',
               'dev_reconstruction_duration_sec': round(len(reconstructed) / cfg.sample_rate, 3),
               'resume_from_step': start_step,
               'corpus_manifest_sha256': corpus_digest,
