@@ -123,3 +123,30 @@ def test_real_probe_counts_invalid_text_without_exposing_it():
     assert report['metadata_invalid_transcripts'] == 1
     assert report['source_audio_verified'] == 2
     assert 'Xin chào' not in str(report)
+
+
+def test_remote_import_prepares_real_zip_subset_as_unapproved_review(tmp_path):
+    from vietdub_native.adam_remote_probe import prepare_remote_adam_tts
+    blob=make_zip()
+    with zip_server(blob) as (url,handler):
+        report=prepare_remote_adam_tts(tmp_path/'adam_remote_review', url=url,
+                                       max_clips=3, max_transfer_bytes=5*1024*1024,
+                                       block_size=32768)
+    assert report['clips_prepared'] == 3
+    assert report['training_approved_by_operator'] is False
+    assert report['downloaded_bytes'] == handler.downloaded
+    assert report['source_transport'] == 'bounded_http_range'
+    assert report['downloaded_bytes'] < len(blob)
+    manifest=tmp_path/'adam_remote_review/vocoder.jsonl'
+    rows=[json.loads(x) for x in manifest.read_text().splitlines()]
+    assert len(rows)==3
+    assert all(not r['vocoder_training_approved'] for r in rows)
+    assert all(sf.info(tmp_path/'adam_remote_review'/r['audio_path']).samplerate==22050 for r in rows)
+
+
+def test_remote_import_cannot_approve_voice_without_review(tmp_path):
+    from vietdub_native.adam_remote_probe import prepare_remote_adam_tts
+    with pytest.raises(ValueError, match='upstream'):
+        prepare_remote_adam_tts(tmp_path/'blocked',
+                                rights_reviewed=True, training_approved=True)
+    assert not (tmp_path/'blocked').exists()

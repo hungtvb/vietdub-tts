@@ -22,19 +22,24 @@ jobs:
       - name: Install minimal audio inspection dependencies (no Torch/model)
         run: python -m pip install 'numpy>=1.26' 'soundfile>=0.12' 'soxr>=0.5' 'pytest>=8'
       - name: Test exact-range protocol against local fake ZIP (no real recordings)
-        run: |
-          mkdir -p "$RUNNER_TEMP/adam-probe-tests"
-          cp tests/test_adam_remote_probe.py "$RUNNER_TEMP/adam-probe-tests/test_adam_remote_probe.py"
-          PYTHONPATH="$GITHUB_WORKSPACE/src" pytest -q "$RUNNER_TEMP/adam-probe-tests"
+        run: PYTHONPATH=src pytest -q tests/test_adam_remote_probe.py
       - name: Inspect up to three actual Adam WAV files by HTTP Range only
         run: >-
           PYTHONPATH=src python -m vietdub_native.adam_remote_probe
           --output data/adam-source-qa.json --limit 3
+      - name: Prepare three actual source WAVs as UNAPPROVED private review-only input
+        run: >-
+          PYTHONPATH=src python -m vietdub_native.adam_remote_probe
+          --output data/adam-import-qa.json
+          --prepare-dir data/adam-real-preview
+          --prepare-clips 3
       - name: Publish metadata-only QA report (never audio, transcripts, checkpoint)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: adam-remote-metadata-qa
-          path: data/adam-source-qa.json
+          path: |
+            data/adam-source-qa.json
+            data/adam-import-qa.json
           retention-days: 7
           if-no-files-found: warn

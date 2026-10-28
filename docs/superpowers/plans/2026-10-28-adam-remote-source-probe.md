@@ -49,3 +49,11 @@
 - [x] Write two failing tests for empty/>1000-character source text and no silent approval.
 - [x] GREEN: preserve valid IDs/rows, quarantine invalid transcripts, add counters; 15 tests passing locally.
 - [ ] Rerun external probe and full CI on branch.
+
+### Task 5: Stream a small authorized or review-only Adam subset without full ZIP
+
+**Files:** Modify `adam_tts_vocoder.py`, `adam_remote_probe.py`; test `test_adam_remote_probe.py`; update notebook and workflow.
+- [x] RED: two tests for missing `prepare_remote_adam_tts`.
+- [x] GREEN: feed seekable HTTPRangeReader directly to existing validated ZipFile importer; rights flags stay OFF by default.
+- [x] Remote mode in Kaggle notebook; optional local archive for full source.
+- [ ] Verify actual real 3-clip preparation in GitHub Actions.

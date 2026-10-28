@@ -28,3 +28,28 @@ blank/oversized text rows, adds `rejected_invalid_transcript` to its report,
 and proceeds with valid rows. The remote QA reports
 `metadata_invalid_transcripts`; malformed JSON or repeated/missing IDs remain
 fatal. This is an actual dataset quality finding, not a synthetic fixture.
+
+## Remote subset import: no 17.5 GB attachment needed
+
+In addition to metadata inspection, the exact same seekable reader can now be
+passed directly into the existing `prepare_adam_tts` importer. Only *selected*
+WAV members are read and downsampled. For preview-only without human rights
+review (this does NOT train):
+
+```bash
+PYTHONPATH=src python -m vietdub_native.adam_remote_probe \
+  --output data/adam-import-qa.json \
+  --prepare-dir data/adam-review --prepare-clips 3
+```
+
+For a private GPU experiment, `prepare_remote_adam_tts()` supports up to 500
+selected clips with an explicit transfer cap; defaults stay review-only. The
+Kaggle notebook now defaults to this *remote* mode (250 clips, 2 GiB cap), but
+**will not run training** without an operator reviewing and attesting both
+corpus rights and upstream synthetic voice/model rights. Use the local ZIP
+importer for larger-scale training once rights are resolved. HTTP Range
+availability is not guaranteed on Kaggle; if unavailable, use a mounted ZIP.
+
+The remote preview output directory includes prepared source WAVs **privately**
+while the CI runner is alive. GitHub uploads **only JSON QA reports**, never
+these recordings or model checkpoints.

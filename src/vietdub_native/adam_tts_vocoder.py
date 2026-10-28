@@ -115,16 +115,24 @@ def prepare_adam_tts(archive_path: str | Path, output_dir: str | Path, *,
     if training_approved and not upstream_voice_rights_reviewed:
         raise ValueError('Review upstream Adam voice / generation rights before training approval')
 
-    archive = Path(archive_path).resolve()
+    # A seekable, explicitly bounded HTTP Range reader is also accepted by
+    # ZipFile; the remote wrapper owns and closes that stream. Existing local
+    # filesystem behaviour and non-overwrite checks remain unchanged.
+    streaming = callable(getattr(archive_path, 'read', None)) and callable(getattr(archive_path, 'seek', None))
     output = Path(output_dir).resolve()
-    if not archive.is_file() or not zipfile.is_zipfile(archive):
-        raise ValueError('Expected a local finnal_tts.zip archive')
-    if output == archive.parent or output.is_relative_to(archive):
-        raise ValueError('Output must not overwrite source archive')
+    if streaming:
+        archive_source = archive_path
+    else:
+        archive = Path(archive_path).resolve()
+        if not archive.is_file() or not zipfile.is_zipfile(archive):
+            raise ValueError('Expected a local finnal_tts.zip archive')
+        if output == archive.parent or output.is_relative_to(archive):
+            raise ValueError('Output must not overwrite source archive')
+        archive_source = archive
     if output.exists() and any(output.iterdir()):
         raise ValueError('Output directory must be empty; cannot mix data releases')
 
-    with zipfile.ZipFile(archive) as zf:
+    with zipfile.ZipFile(archive_source) as zf:
         prefix, entries = _validate_zip_archive(zf)
         rejected_transcripts: list[int] = []
         records = _read_metadata(zf, entries[prefix + 'data.jsonl'],

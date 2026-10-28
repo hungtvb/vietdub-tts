@@ -210,12 +210,54 @@ def probe_remote_zip(url: str = REMOTE_ARCHIVE, *, limit: int = 3,
             raise RemoteProbeError(f'ZIP metadata/audio probe failed: {exc}') from exc
 
 
+
+def prepare_remote_adam_tts(output_dir, *, url: str = REMOTE_ARCHIVE,
+                            max_clips: int = 48, seed: int = 7,
+                            dev_fraction: float = .05,
+                            rights_reviewed: bool = False,
+                            upstream_voice_rights_reviewed: bool = False,
+                            training_approved: bool = False,
+                            max_transfer_bytes: int = 512 * 1024 * 1024,
+                            block_size: int = 262144) -> dict:
+    """Import a bounded Adam subset without downloading the 17.5GB ZIP.
+
+    Default is review-only. Training remains explicitly blocked unless the
+    operator has independently verified BOTH dataset and upstream voice rights.
+    Download limit is a hard upper bound; no fallback to full-archive GET.
+    """
+    if not 3 <= max_clips <= 500:
+        raise RemoteProbeError('Remote subset limit must be 3..500 clips')
+    if not block_size + 1 <= max_transfer_bytes <= 8 * 1024**3:
+        raise RemoteProbeError('Remote transfer budget must be bounded between one block and 8 GiB')
+    if training_approved and not rights_reviewed:
+        raise ValueError('Dataset rights review is required for training approval')
+    if training_approved and not upstream_voice_rights_reviewed:
+        raise ValueError('Review upstream Adam voice rights before training approval')
+    from .adam_tts_vocoder import prepare_adam_tts
+    with HTTPRangeReader(url, max_transfer_bytes=max_transfer_bytes,
+                         block_size=block_size) as remote:
+        report = prepare_adam_tts(remote, output_dir, max_clips=max_clips,
+                                  seed=seed, dev_fraction=dev_fraction,
+                                  rights_reviewed=rights_reviewed,
+                                  upstream_voice_rights_reviewed=upstream_voice_rights_reviewed,
+                                  training_approved=training_approved)
+        report.update({'source_transport': 'bounded_http_range',
+                       'downloaded_bytes': remote.downloaded_bytes,
+                       'source_archive_bytes': remote.size})
+    from pathlib import Path
+    output_path = Path(output_dir) / 'import_report.json'
+    output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    return report
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Bounded real Adam ZIP inspection without 17.5GB download')
     parser.add_argument('--output', required=True)
     parser.add_argument('--limit', type=int, default=3)
+    parser.add_argument('--prepare-dir', help='Import bounded review-only WAV subset (never approve training)')
+    parser.add_argument('--prepare-clips', type=int, default=3)
     args = parser.parse_args(argv)
-    result = probe_remote_zip(limit=args.limit)
+    result = (prepare_remote_adam_tts(args.prepare_dir, max_clips=args.prepare_clips)
+              if args.prepare_dir else probe_remote_zip(limit=args.limit))
     from pathlib import Path
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
