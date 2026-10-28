@@ -41,3 +41,11 @@
 - [ ] Push to feature branch and inspect remote outcome.
 - [ ] Document exact findings or remote failure.
 - [ ] Review PR and keep draft until real rights/training resolved.
+
+### Task 4: Quarantine invalid text rows observed in real archive
+
+**Files:** Modify `src/vietdub_native/adam_tts_vocoder.py` and `adam_remote_probe.py`; tests in `test_adam_tts_vocoder.py` and `test_adam_remote_probe.py`.
+- [x] RED: first real Hugging Face probe reached `data.jsonl` and failed at line 1211.
+- [x] Write two failing tests for empty/>1000-character source text and no silent approval.
+- [x] GREEN: preserve valid IDs/rows, quarantine invalid transcripts, add counters; 15 tests passing locally.
+- [ ] Rerun external probe and full CI on branch.

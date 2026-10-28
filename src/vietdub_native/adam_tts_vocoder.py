@@ -52,7 +52,13 @@ def _validate_zip_archive(zf: zipfile.ZipFile) -> tuple[str, dict[str, zipfile.Z
     return meta[0][: -len('data.jsonl')], files
 
 
-def _read_metadata(zf: zipfile.ZipFile, entry: zipfile.ZipInfo) -> list[dict]:
+def _read_metadata(zf: zipfile.ZipFile, entry: zipfile.ZipInfo, *,
+                   rejected_transcript_lines: list[int] | None = None) -> list[dict]:
+    """Keep structurally valid IDs, quarantine blank/oversized transcripts.
+
+    Skips transcript defects only. Malformed JSON, missing/duplicate IDs and
+    corrupt archive metadata remain hard failures. Never truncates text.
+    """
     if entry.file_size > MAX_MANIFEST_BYTES:
         raise ValueError('data.jsonl exceeds metadata size limit')
     items = []
@@ -66,19 +72,25 @@ def _read_metadata(zf: zipfile.ZipFile, entry: zipfile.ZipInfo) -> list[dict]:
             continue
         try:
             row = json.loads(line)
-            ident, text = row['id'], row['text']
+            ident = row['id']
             if type(ident) is not int or ident < 1 or ident in ids:
                 raise ValueError('id must be a unique positive integer')
-            if not isinstance(text, str) or not 1 <= len(text.strip()) <= 1000:
-                raise ValueError('text must be a nonempty Vietnamese string (<=1000 chars)')
-            if not _text_group(text):
-                raise ValueError('transcript normalizes to empty text')
             ids.add(ident)
-            items.append({'id': ident, 'text': text.strip(), 'group': _text_group(text)})
+            text = row.get('text')
+            if not isinstance(text, str) or not 1 <= len(text.strip()) <= 1000:
+                if rejected_transcript_lines is not None:
+                    rejected_transcript_lines.append(index)
+                continue
+            group = _text_group(text)
+            if not group:
+                if rejected_transcript_lines is not None:
+                    rejected_transcript_lines.append(index)
+                continue
+            items.append({'id': ident, 'text': text.strip(), 'group': group})
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError(f'data.jsonl line {index}: {exc}') from exc
     if len(items) < 3:
-        raise ValueError('Need at least 3 transcript rows to split train/dev')
+        raise ValueError('Need at least 3 valid transcript rows to split train/dev')
     return items
 
 
@@ -114,7 +126,9 @@ def prepare_adam_tts(archive_path: str | Path, output_dir: str | Path, *,
 
     with zipfile.ZipFile(archive) as zf:
         prefix, entries = _validate_zip_archive(zf)
-        records = _read_metadata(zf, entries[prefix + 'data.jsonl'])
+        rejected_transcripts: list[int] = []
+        records = _read_metadata(zf, entries[prefix + 'data.jsonl'],
+                                 rejected_transcript_lines=rejected_transcripts)
         # Select clips deterministically regardless of data.jsonl order.
         records.sort(key=lambda row: _rank(seed, str(row['id'])))
         output.mkdir(parents=True, exist_ok=True)
@@ -234,6 +248,7 @@ def prepare_adam_tts(archive_path: str | Path, output_dir: str | Path, *,
         'speech_origin': 'synthetic', 'speaker_count': 1,
         'train_dev_policy': 'text_group_disjoint_single_synthetic_voice',
         'clips_prepared': len(rows), 'train_clips': train_count, 'dev_clips': dev_count,
+        'rejected_invalid_transcript': len(rejected_transcripts),
         'rejected_missing_audio': rejected_missing,
         'rejected_bad_audio': rejected_bad,
         'rejected_duplicate_audio': rejected_duplicate,

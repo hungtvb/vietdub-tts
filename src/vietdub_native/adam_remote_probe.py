@@ -159,7 +159,8 @@ def probe_remote_zip(url: str = REMOTE_ARCHIVE, *, limit: int = 3,
             with zipfile.ZipFile(remote) as zf:
                 prefix, entries = _validate_zip_archive(zf)
                 manifest_info = entries[prefix + 'data.jsonl']
-                rows = _read_metadata(zf, manifest_info)
+                rejected_transcripts: list[int] = []
+                rows = _read_metadata(zf, manifest_info, rejected_transcript_lines=rejected_transcripts)
                 # Representative, reproducible sparse selection: beginning/middle/end
                 # of metadata, rather than only the easiest first few files.
                 indexes = sorted({round(i * (len(rows)-1)/max(limit-1,1)) for i in range(limit)})
@@ -194,6 +195,7 @@ def probe_remote_zip(url: str = REMOTE_ARCHIVE, *, limit: int = 3,
                     'archive_bytes': remote.size,
                     'zip_members': len(entries),
                     'metadata_rows': len(rows),
+                    'metadata_invalid_transcripts': len(rejected_transcripts),
                     'source_audio_verified': len(durations),
                     'sampled_seconds': round(sum(durations), 3),
                     'sample_median_seconds': round(statistics.median(durations), 3) if durations else None,

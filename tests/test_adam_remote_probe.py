@@ -104,3 +104,22 @@ def test_remote_probe_limits_and_mismatched_header():
             probe_remote_zip(url,limit=0)
         with pytest.raises(RemoteProbeError,match='transfer'):
             probe_remote_zip(url,limit=2,max_transfer_bytes=10)
+
+
+def test_real_probe_counts_invalid_text_without_exposing_it():
+    blob = io.BytesIO()
+    with zipfile.ZipFile(blob, 'w', compression=zipfile.ZIP_STORED) as z:
+        rows=[]
+        for i in range(1, 7):
+            rows.append({'id': i, 'text': ' ' if i == 2 else f'Xin chào {i}'})
+            t=np.arange(int(.6*48000))/48000
+            signal=(.12*np.sin(2*np.pi*(180+i*11)*t)).astype('float32')
+            b=io.BytesIO();sf.write(b,signal,48000,format='WAV',subtype='PCM_16')
+            z.writestr(f'dataset/wav/{i}.wav',b.getvalue())
+        z.writestr('dataset/data.jsonl',''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in rows))
+    with zip_server(blob.getvalue()) as (url,_):
+        report=probe_remote_zip(url,limit=2,max_transfer_bytes=4*1024*1024)
+    assert report['metadata_rows'] == 5
+    assert report['metadata_invalid_transcripts'] == 1
+    assert report['source_audio_verified'] == 2
+    assert 'Xin chào' not in str(report)

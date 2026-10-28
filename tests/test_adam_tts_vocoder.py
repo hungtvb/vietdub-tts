@@ -138,3 +138,17 @@ def test_audio_text_pairs_exported_for_future_alignment_but_never_auto_verified(
     assert all(r['transcript_verified'] is False and r['alignment_verified'] is False for r in rows)
     assert all(r['split'] == 'review_unassigned' and 'token_durations' not in r for r in rows)
     assert all(r['emotion_status'] == 'unverified_placeholder' for r in rows)
+
+
+def test_invalid_source_transcripts_are_skipped_with_audit_count(tmp_path):
+    texts = ['Câu một bình thường', ' ', 'Câu ba hợp lệ',
+             'A' * 1201, 'Câu năm hợp lệ', 'Câu sáu hợp lệ',
+             'Câu bảy hợp lệ', 'Câu tám hợp lệ']
+    src = _archive(tmp_path, texts=texts)
+    report = prepare_adam_tts(src, tmp_path/'review_invalid', max_clips=8)
+    assert report['rejected_invalid_transcript'] == 2
+    assert report['clips_prepared'] == 6
+    review = [json.loads(s) for s in (tmp_path/'review_invalid/transcripts_review.jsonl').read_text().splitlines()]
+    assert len(review) == 6
+    assert all(r['transcript_verified'] is False for r in review)
+    assert all(1 <= len(r['text'].strip()) <= 1000 for r in review)
